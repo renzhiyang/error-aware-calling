@@ -3,8 +3,14 @@ import hydra
 import gzip
 
 from omegaconf import DictConfig, OmegaConf
+from typing import List, Dict
 
-def read_vcf(filename):
+
+# Load variants from　vcf file
+# Return is a  two-level dictionary
+# key-1: chromosome, key-2: position
+# value: reference base, alternates base, is_indel
+def read_vcf(filename: str) -> dict:
     variants = {}
     open_func = gzip.open if filename.endswith('.gz') else open
     with open_func(filename, 'rt') as file:
@@ -17,12 +23,17 @@ def read_vcf(filename):
             ref = columns[3]
             alts = columns[4].split(',')
             is_indel = len(ref) > 1 or any(len(alt)>1 for alt in alts)
-            variants[pos] = {'chr': chr, 'ref': ref, 'alts': alts, 'is_indel': is_indel}
+            
+            if chr not in variants:
+                variants[chr] = {}
+            variants[chr][pos] = {'ref': ref, 'alts': alts, 'is_indel': is_indel}
     return variants
 
 
 # Load confident regions
-def read_bed(filename):
+# return confident regions
+# key: chromosome name. Value: start position, end position
+def read_bed(filename: str):
     regions = {}
     open_func = gzip.open if filename.endswith('.gz') else open
     with open_func(filename, 'rt') as file:
@@ -44,22 +55,39 @@ def is_error(position, base, is_indel):
     return None
 
 
-def build_training_label(cfg):
+# To verify if read in confident regions
+def is_read_in_confident_region(read: pysam.AlignedSegment, confident_regions: list) -> bool:
+    for start, end in confident_regions:
+        if read.reference_start < end and read.reference_end > start:
+            return True
+    return False
+
+
+# Output labeled data to a file
+def print_labeled_data(chrom: str, read: pysam.AlignedSegment, variants: dict):
+    # TODO: iterate all bases in read, if the base support reference or variants, it is marked as
+    # positive label. Otherwise it is marked as negative label.
+    # output these information each line:
+    # chrom, position, positive/negative label, read base, reference/variant base, sequence(200 bases before and after the current locus)  
+    return
+
+
+def generate_label(cfg):
     bam_file = pysam.AlignmentFile(cfg.data_path.bam_f)
-    confident_regions = read_bed(cfg.data_path.confident_f)
-    print(confident_regions)
-    return 
-    variants = read_vcf(cfg.data_path.vcf_f)
+    confident_regions = read_bed(cfg.data_path.confident_f) 
+    variants_dict = read_vcf(cfg.data_path.vcf_f)
     for read in bam_file:
         if read.mapping_quality <= cfg.alignment_filter.min_mapping_quality:
-            continue
-        return
-    
+            continue # Filter reads with lower mapping quality
+        
+        chrom = bam_file.get_reference_name(read.reference_id)
+        if chrom in confident_regions and is_read_in_confident_region(read, confident_regions[chrom]):
+            print_labeled_data(chrom, read, variants_dict[chrom])
     
 
 @hydra.main(version_base=None, config_path='../../configs/error-prediction', config_name='params.yaml')
 def main(cfg: DictConfig) -> None:
-    build_training_label(cfg) 
+    generate_label(cfg) 
 
 
 if __name__ == '__main__':
