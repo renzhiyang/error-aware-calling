@@ -207,51 +207,6 @@ def label_data(chrom: str, read: pysam.AlignedSegment,
         indel_sequence = indel_sequence.replace("+", "").replace("-", "")
         handle_indel_loci(chrom, indel_type, indel_sequence, ref_base,
                      indel_start, variants, full_read_sequence, config)
-    
-def new_label_data(chrom: str, read: pysam.AlignedSegment, 
-               variants: dict, reference_sequence: pysam.FastxFile, config: DictConfig):
-
-    full_read_sequence = read.query_sequence
-
-    # Initialize variables to track indels
-    indel_sequence, indel_start_in_read = "", None
-    is_indel = False
-    last_ref_pos, last_read_pos = None, None  # Track the last positions in reference and read
-
-    # Iterate over each base in the read
-    for read_pos, ref_pos, _ in read.get_aligned_pairs(with_seq=True):
-        if ref_pos is not None:
-            last_ref_pos = ref_pos  # Update the last reference position
-        if read_pos is not None:
-            last_read_pos = read_pos  # Update the last read position
-            read_base = full_read_sequence[read_pos] if read_pos is not None else None
-
-        if ref_pos is not None and read_pos is not None:  # Matched base or SNP
-            if is_indel:  # Exiting an indel, handle it
-                indel_type = "insertion" if "+" in indel_sequence else "deletion"
-                # For insertions, use the position before the indel starts in the read
-                handle_indel_loci(chrom, indel_type, indel_sequence.replace("+", "").replace("-", ""), 
-                                  last_ref_pos, indel_start_in_read, variants, full_read_sequence, config)
-                indel_sequence, indel_start_in_read, is_indel = "", None, False  # Reset indel tracking
-            
-            # Handle SNP or matching reference
-            if ref_pos in variants:
-                handle_snp_loci(chrom, ref_pos, read_base, last_ref_pos, variants, full_read_sequence, read_pos, config)
-            else:
-                # Handle no-variant loci
-                handle_no_variant_loci(chrom, ref_pos, read_base, last_ref_pos, full_read_sequence, read_pos, config)
-        else:  # Current base is part of an indel
-            if not is_indel:  # New indel start
-                indel_start_in_read = last_read_pos  # Set the start position in the read for the indel
-                is_indel = True
-            indel_sequence += ('+' if read_pos is not None else '-') + (read_base if read_pos is not None else '')
-
-    # Check if there was an indel at the end
-    if is_indel:
-        indel_type = "insertion" if "+" in indel_sequence else "deletion"
-        handle_indel_loci(chrom, indel_type, indel_sequence.replace("+", "").replace("-", ""), 
-                          last_ref_pos, indel_start_in_read, variants, full_read_sequence, config)
-
 
 def generate_label(config):
     bam_file = pysam.AlignmentFile(config.data_path.bam_f)
