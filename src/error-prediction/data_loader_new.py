@@ -186,7 +186,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                                                   config=config)
             print_label(chrom, ref_pos, deleted_bases, "-", deleted_bases,
                         "None", "None", "deletion", sequence_around, config)
-            print("deletion", ref_pos, deleted_bases)
+            #print("deletion", ref_pos, deleted_bases)
             ref_pos += length
             
         elif cigar_op == 3: # N (skipped region from the reference) 
@@ -196,9 +196,11 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
             read_pos += length
 
         # No need to adjust  fro H (hard clipping) and P (padding) as they don't consume ref or read
-     
+    
         
-def label_phased_read():
+def label_phased_read(chrom:str, read:pysam.AlignedSegment, 
+                        ref_seq:pysam.FastxFile,
+                        phased_variants:dict, config:DictConfig):
     return
 
 
@@ -208,7 +210,7 @@ def label_data(chrom: str, read: pysam.AlignedSegment,
     if haplotype == None:
         label_unphased_read(chrom, read, ref_seq, phased_variants, config)
         return
-    label_phased_read()
+    label_phased_read(chrom, read, ref_seq, phased_variants, config)
 
 
 def generate_label(config):
