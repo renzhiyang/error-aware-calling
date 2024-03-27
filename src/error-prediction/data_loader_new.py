@@ -201,7 +201,10 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
 def label_phased_read(chrom:str, read:pysam.AlignedSegment, 
                         ref_seq:pysam.FastxFile,
                         phased_variants:dict, config:DictConfig):
-    return
+    full_read_sequence = read.query_sequence
+    
+    
+    return 
 
 
 def label_data(chrom: str, read: pysam.AlignedSegment, 
