@@ -161,6 +161,14 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
     Returns:
     
     """
+    # Output the current query name and query length
+    print(f'Unphased read: {read.query_name}, length: {read.query_length}', flush=True)
+    
+    # Track the progress of program
+    current_pos = 0
+    label_count = 0
+    tracking_threshold = {30, 60, 90}
+    
     full_read_sequence = read.query_sequence
     ref_pos = read.reference_start  
     read_pos = 0
@@ -177,7 +185,6 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                 
                 ref_base = ref_seq[ref_pos + i]
                 read_base = full_read_sequence[read_pos + i]
-                
                 # mismatch, and non germline variant loci, vcf file variant should change to 1-based.
                 if ref_base != read_base and ref_pos + i + 1  not in variants: 
                     sequence_around = get_sequence_around(full_read_sequence=full_read_sequence, 
@@ -189,6 +196,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                                 read_base=read_base, ref_base=ref_base, 
                                 alts=None, is_germline="No", variant_type="SNV", 
                                 sequence_around=sequence_around, config=config)
+                    label_count += 1
                     # Print test
                     #print(f'ref_pos:{ref_pos+i+1}, ref_base:{ref_base}, read_base:{read_base}'
                     #  f'sequence_around:{sequence_around}')
@@ -214,6 +222,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                             read_base=inserted_bases, ref_base=ref_base, 
                             alts=None, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
+                label_count += 1
                 # Print test
                 #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, inserted_bases:{inserted_bases}, sequence_around:{sequence_around}')
             read_pos += length     
@@ -238,6 +247,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                             read_base=read_base, ref_base=ref_base+deleted_bases, 
                             alts=None, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
+                label_count += 1
                 # Print test
                 #print(f'ref_pos:{ref_pos}, ref_base:{ref_base+deleted_bases}, deleted_bases:{deleted_bases}, sequence_around:{sequence_around}')
             ref_pos += length
@@ -249,13 +259,28 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
             read_pos += length
 
         # No need to adjust  fro H (hard clipping) and P (padding) as they don't consume ref or read
-    
+        
+        # Update tracking
+        current_pos += length
+        progress = (current_pos / read.query_length) * 100
+        crossed_threshold = {t for t in tracking_threshold if progress >= t}
+        for t in crossed_threshold:
+            print(f"Crossed {t}% threshold at position: {current_pos}, ref pos: {ref_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
+            tracking_threshold.remove(t)
+         
         
 def label_phased_read(chrom:str, read:pysam.AlignedSegment, 
                         ref_seq:pysam.FastxFile,
                         variants:dict, 
                         confident_regions: list, 
                         config:DictConfig):
+    # Output the current query name and query length
+    print(f'Phased read: {read.query_name}, length: {read.query_length}', flush=True)
+    # Track the progress of program
+    current_pos = 0
+    label_count = 0
+    tracking_threshold = {30, 60, 90}
+    
     full_read_sequence = read.query_sequence
     ref_pos = read.reference_start
     haplotype_index = get_tag(read, "HP") - 1
@@ -296,6 +321,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                     read_base=read_base, ref_base=ref_base, 
                                     alts=alts, is_germline="No", variant_type="SNV", 
                                     sequence_around=sequence_around, config=config)
+                    label_count += 1
                 
                 if is_germline:
                     #对于是germline variant的位点，还要分两种情况：1.phased variant；2.unphased variant
@@ -320,6 +346,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                         read_base=read_base, ref_base=ref_base, 
                                         alts=alts, is_germline="Yes", variant_type="SNV", 
                                         sequence_around=sequence_around, config=config)
+                        label_count += 1
             ref_pos += length
             read_pos += length
         
@@ -359,6 +386,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                     read_base=inserted_bases, ref_base=ref_base, 
                                     alts=alts, is_germline="Yes", variant_type="Insertion", 
                                     sequence_around=sequence_around, config=config)
+                    label_count += 1
                         
                 # Test print
                 #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, label:{label}, alts:{alts}'
@@ -376,6 +404,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                             read_base=inserted_bases, ref_base=ref_base, 
                             alts=alts, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
+                label_count += 1
                 # Test print
                 #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, inserted_base:{inserted_bases}',
                 #      f'sequence_around:{sequence_around}')   
@@ -421,6 +450,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                     read_base=read_base, ref_base=ref_base+deleted_bases, 
                                     alts=alts, is_germline="Yes", variant_type="Deletion", 
                                     sequence_around=sequence_around, config=config)
+                    label_count += 1
                     # print test
                     #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, label:{label}, alts:{alts}, deleted_bases:{deleted_bases}'
                     #    f'sequence:{sequence_around}')
@@ -437,6 +467,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                             read_base=read_base, ref_base=ref_base+deleted_bases, 
                             alts=alts, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
+                label_count += 1
                 # print test
                 #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, read_base:{read_base}, label:{ref_base + deleted_bases}, alts:{alts}, deleted_bases:{deleted_bases} '
                 #        f'sequence:{sequence_around}')
@@ -449,7 +480,14 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
         
         elif cigar_op == 4:
             read_pos += length
-                    
+        
+        # Update tracking
+        current_pos += length
+        progress = (current_pos / read.query_length) * 100
+        crossed_threshold = {t for t in tracking_threshold if progress >= t}
+        for t in crossed_threshold:
+            print(f"Crossed {t}% threshold at position: {current_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
+            tracking_threshold.remove(t)
     
     return 
 
@@ -458,10 +496,12 @@ def label_data(chrom: str, read: pysam.AlignedSegment,
                        variants: dict, ref_seq:pysam.FastxFile, 
                        confident_regions: list, config:DictConfig):
     haplotype = get_phased_read_haplotype(read)
-    if haplotype == None:
+    if haplotype == None and config.controller.unphased == 'Y':
         label_unphased_read(chrom, read, ref_seq, variants, confident_regions, config)
-    else:
+    elif haplotype != None and config.controller.phased == 'Y':
         label_phased_read(chrom, read, ref_seq, variants, confident_regions, config)
+    else:
+        return
 
 
 def generate_label(config):
@@ -477,13 +517,14 @@ def generate_label(config):
             continue # Filter reads with lower mapping quality
         
         chrom = bam_file.get_reference_name(read.reference_id)
-        if chrom in confident_regions :
+        if chrom in confident_regions and is_read_in_confident_region(read, confident_regions[chrom]) :
             #new_label_data(chrom, read, variants_dict[chrom], reference[chrom], config)
             label_data(chrom, read, variants[chrom], reference[chrom], confident_regions[chrom], config)
     
     
 @hydra.main(version_base=None, config_path='../../configs/error-prediction', config_name='params.yaml')
 def main(config: DictConfig) -> None:
+    print(config.label.window_size_half, config.data_path.label_f, flush=True)
     generate_label(config) 
 
 
