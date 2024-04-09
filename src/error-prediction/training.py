@@ -3,6 +3,7 @@ import hydra
 import gzip
 
 import numpy as np
+import torch.optim as optim
 import data_loader_training as data
 
 from typing import List, Dict
@@ -78,8 +79,8 @@ class DataEncoder:
 
 
 def seq_to_array(seq: str, map_dict: dict):
-    seq = [float(map_dict[char]) for char in seq]
-    array = np.array(seq, dtype=np.float32)
+    array = [float(map_dict[char]) for char in seq]
+    array = np.array(array, dtype=np.float32)
     return array
     
 
@@ -91,7 +92,7 @@ def create_data_loader(dataset: DataEncoder, batch_size: int, train_ratio: float
     train_size = int(train_ratio * len(dataset))
     test_size = len(dataset) - train_size
     
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])  # type: ignore
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
