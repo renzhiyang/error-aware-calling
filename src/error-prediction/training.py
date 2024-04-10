@@ -1,4 +1,5 @@
 import os
+from turtle import forward
 import hydra
 import gzip
 
@@ -23,7 +24,7 @@ class DataEncoder:
         self.line_offsets = []
         self.total_lines = 0
         self.config = config
-        self.base_int_dict = {'A': 0, 'C': 1, 'G': 2, 'T': 3, '-': 4}
+        self.vocab = {'A': 1, 'C': 2, 'G': 3, 'T': 4, '-': 5, '[SEP]': 6, '[CLS]': 7, '[EOS]': 8}
         
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f'The file {file_path} does not exist')
@@ -51,38 +52,58 @@ class DataEncoder:
             line = file.readline()
             parts = line.strip().split(' ')
             
+            position = parts[2].split(':')[1]
             sequence_around = parts[-1].split(':')[1]
             variant_type = parts[-2].split(':')[1]
             read_base = parts[4].split(':')[1]
             truth_base = parts[3].split(':')[1]
             forward_bases = sequence_around[0:self.config.label.window_size_half]
             behind_bases = sequence_around[-self.config.label.window_size_half:]
-
-            input_seq = forward_bases
-            label_seq = truth_base
-            if variant_type == "SNV":
-                input_seq = input_seq + read_base
-            elif variant_type == "Insertion":
-                input_seq = input_seq + read_base
-                label_seq = label_seq + '-' * len(read_base)
-            # deletion时不用改变, 详情参照PPT researchprogress_202404
             
-            #output debug
-            #print(parts, flush=True)
-            #print(variant_type, read_base, label_base, forward_bases, behind_bases, len(sequence_around), flush=True)
-            input_array = seq_to_array(input_seq, self.base_int_dict)
-            label_array = seq_to_array(label_seq, self.base_int_dict)
-            num_classes = 5 # 0, 1, 2, 3, 4 | A, C, G, T, - 
-            label_array = np.eye(num_classes)[label_array.astype(int)] # one-hot encoding of label
-            #print(input_array, label_array, type(input_array), type(label_array), flush=True)
-            return input_array, label_array
+            if variant_type == "Insertion":
+                results = []
+                for i in range(len(read_base)):
+                    update_forward_bases = forward_bases + (i * '-')
+                    input_array = input_tokenization(update_forward_bases, read_base[i],
+                                                   self.config.training.input_length, self.vocab)
+                    label_array = label_tokenization('-', self.vocab)
+                    results.append((input_array, label_array))
+                    print(f'pos: {position}, Insertion forward base: {update_forward_bases}, read_base:{read_base[i]},'
+                          f'truth_seq: -, len_input: {len(input_array)}\n')
+                return results
+            else:
+                if variant_type == "Deletion":
+                    forward_bases = forward_bases[:-1]
+                
+                input_array = input_tokenization(forward_bases, read_base, 
+                                               self.config.training.input_length, self.vocab)
+                label_array = np.array(truth_base, dtype=np.float32)
+                print(f'pos: {position}, {variant_type} forward base: {forward_bases}, len_input:{len(input_array)}'
+                      f'read_base:{read_base}, label:{truth_base}\n')
+                return input_array, label_array
 
 
-def seq_to_array(seq: str, map_dict: dict):
-    array = [float(map_dict[char]) for char in seq]
+def input_tokenization(seq_1: str, seq_2:str, max_length:int, vocab: dict):
+    '''
+        Encoding inputs for Encoder-only Transformer.
+        e.g., INPUT, previous bases: AACCTTTT; current base: T
+              ENCODED INPUT: [CLS]AACCTTTT[SEP]T
+    '''
+    array = [vocab["[CLS]"]] \
+            + [vocab[char] for char in seq_1] \
+            + [vocab["[SEP]"]] \
+            + [vocab[char] for char in seq_2]
+    while len(array) < max_length:
+        array.append(0)
     array = np.array(array, dtype=np.float32)
     return array
-    
+
+
+def label_tokenization(seq: str, vocab: dict):
+    array = [vocab[char] for char in seq] \
+            + vocab["[EOS]"]
+    array = np.array(array, dtype=np.float32)
+    return array
 
 
 def create_data_loader(dataset: DataEncoder, batch_size: int, train_ratio: float):
@@ -109,7 +130,8 @@ def main(config: DictConfig) -> None:
     train_loader, test_loader = create_data_loader(dataset, 
                                                    batch_size=config.training.batch_size,
                                                    train_ratio=config.training.train_ratio)
-    
+    for batch in enumerate(train_loader):
+        print('ok')
     
 
 if __name__ == '__main__':
