@@ -225,7 +225,7 @@ def create_data_loader(dataset, batch_size: int, train_ratio: float):
     return train_loader, test_loader
 
 
-def train(model, train_loader, test_loader, criterion, optimizer, epochs):
+def train_test(model, train_loader, test_loader, criterion, optimizer, epochs):
     save_interval = 10
     train_losses = []
     val_losses = []
@@ -257,7 +257,8 @@ def train(model, train_loader, test_loader, criterion, optimizer, epochs):
         epoch_loss = running_loss / len(train_loader)
 
         print(f'Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}', flush=True)
-           
+    
+    #TODO: evaluating my model and print figures, and tensorboard summary   
 
 @hydra.main(version_base=None, config_path='../../configs/error-prediction', config_name='params.yaml')
 def main(config: DictConfig) -> None:
@@ -282,7 +283,7 @@ def main(config: DictConfig) -> None:
                                                    batch_size=config.training.batch_size,
                                                    train_ratio=config.training.train_ratio)
     
-    train(model, train_loader, test_loader, criterion, optimizer, config.training.epochs)
+    train_test(model, train_loader, test_loader, criterion, optimizer, config.training.epochs)
     
 
 if __name__ == '__main__':
