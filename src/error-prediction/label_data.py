@@ -522,9 +522,11 @@ def generate_label(config):
             label_data(chrom, read, variants[chrom], reference[chrom], confident_regions[chrom], config)
     
     
-@hydra.main(version_base=None, config_path='../../configs/error-prediction', config_name='params.yaml')
+@hydra.main(version_base=None, config_path='../../configs/', config_name='defaults.yaml')
 def main(config: DictConfig) -> None:
-    print(config.label.window_size_half, config.data_path.label_f, flush=True)
+    config = config.label_data
+    #print(config.label.window_size_half, config.data_path.label_f, flush=True)
+    print(OmegaConf.to_yaml(config), flush=True)
     generate_label(config) 
 
 
