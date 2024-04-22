@@ -1,7 +1,0 @@
-defaults:
-  - test: config 
-  - _self_
-
-test:
-  db:
-    driver: yangrenzhi

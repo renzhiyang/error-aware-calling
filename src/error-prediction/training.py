@@ -112,6 +112,7 @@ class DataEncoder_cigarbased(DataEncoder_readbased):
             position = parts[2].split(':')[1]
             sequence_around = parts[-1].split(':')[1]
             variant_type = parts[-2].split(':')[1]
+            label_type = parts[1].split(':')[1]
             read_base = parts[4].split(':')[1]
             truth_base = parts[3].split(':')[1]
             forward_bases = sequence_around[0:self.config.label.window_size_half]
@@ -138,9 +139,10 @@ class DataEncoder_cigarbased(DataEncoder_readbased):
             
             if input_array is None:
                 return None
-            
-            label_ont_hot = ont_hot_encoding(label_array, 5)
-            return input_array, label_ont_hot
+            label_type = np.array([1, 0]) if label_type == "Positive" else np.array([0, 1])
+            label_seq_ont_hot = ont_hot_encoding(label_array, 5)
+            return input_array, label_type, label_seq_ont_hot
+
 
 def input_tokenization(seq_1: str, seq_2:str, max_length:int, vocab: dict):
     '''
@@ -203,11 +205,12 @@ def ont_hot_encoding(label_array, num_class: int):
 def custon_collate_fn(batch):
     batch = [item for item in batch if item is not None]
     if not batch:
-        return torch.tensor([]), torch.tensor([])
-    inputs, labels = zip(*batch)
+        return torch.tensor([]), torch.tensor([]), torch.tensor([])
+    inputs, label_types, labels = zip(*batch)
     inputs = torch.stack([torch.tensor(input, dtype=torch.float32) for input in inputs])
+    label_types = torch.stack([torch.tensor(label_type, dtype=torch.float32) for label_type in label_types])
     labels = torch.stack([torch.tensor(label, dtype=torch.float32) for label in labels])
-    return inputs, labels
+    return inputs, label_types, labels
 
 
 def create_data_loader(dataset, batch_size: int, train_ratio: float):
@@ -225,22 +228,23 @@ def create_data_loader(dataset, batch_size: int, train_ratio: float):
     return train_loader, test_loader
 
 
-def train_test(model, train_loader, test_loader, criterion, optimizer, epochs):
+def ensure_dir(file_path):
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+def train(model, train_loader, test_loader, criterion, optimizer, config):
     save_interval = 10
-    train_losses = []
-    val_losses = []
-    val_accuracies = []
-    val_precisions = []
-    val_recalls = []
-    val_f1s = []
+    epochs = config.training.epochs
     
     for epoch in range(epochs):
         model.train()
         running_loss = 0
         
-        for i, (inputs, labels) in enumerate(train_loader):
+        for i, (inputs, label_types, labels) in enumerate(train_loader):
             optimizer.zero_grad()
-            inputs, labels = inputs.to(device), labels.to(device)
+            inputs, label_types, labels = inputs.to(device), label_types.to(device), labels.to(device)
+            #print(label_types) 
             #print(inputs, labels, inputs.shape, labels.shape)
             src_mask = (inputs == 0)
             src_mask = torch.permute(src_mask, (1,0))
@@ -249,21 +253,69 @@ def train_test(model, train_loader, test_loader, criterion, optimizer, epochs):
             
             outputs = model(inputs, src_mask)
             #print(f'output shape: {outputs.shape}, label shape: {labels.shape}')
-            loss = criterion(outputs, labels)
+            #print(outputs)
+            #loss = criterion(outputs, labels)
+            loss = criterion(outputs, label_types)
             loss.backward()
-            optimizer.step()
-            
+            optimizer.step() 
             running_loss += loss.item()
+            
         epoch_loss = running_loss / len(train_loader)
-
+        writer.add_scalar('Loss/train', epoch_loss, epoch)
+        
+        val_loss, accuracy = test(model, test_loader, criterion)
+        writer.add_scalar('Loss/test', val_loss, epoch)
+        writer.add_scalar('Accuracy/test', accuracy, epoch)
+        writer.flush()
         print(f'Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}', flush=True)
-    
-    #TODO: evaluating my model and print figures, and tensorboard summary   
 
-@hydra.main(version_base=None, config_path='../../configs/error-prediction', config_name='params.yaml')
+        if (epoch + 1) % save_interval == 0:
+            model_dir = config.training.model_path + '/' + datetime.now().strftime("model-%Y%m%d-%H%M%S/")
+            ensure_dir(model_dir)
+            model_save_path = os.path.join(model_dir, f'{config.training.out_predix}_epoch_{epoch+1}.pt')
+            torch.save(model.state_dict(), model_save_path)
+            model.load_state_dict(torch.load(model_save_path, map_location=device))
+            print(f'Model saved at epoch {epoch+1}', flush=True)
+    writer.close()
+      
+
+def test(model, test_loader, criterion):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for inputs, label_types, labels in test_loader:
+            inputs, label_types, labels = inputs.to(device), label_types.to(device), labels.to(device)
+            src_mask = (inputs == 0)
+            src_mask = torch.permute(src_mask, (1,0))
+            src_mask = src_mask.to(device)
+            
+            outputs = model(inputs, src_mask)
+            #loss = criterion(outputs, labels)
+            loss = criterion(outputs, label_types)
+            running_loss += loss.item()
+            #print(f'labels 1: {labels}')
+            #_, predicted = torch.max(outputs.data, 2)
+            #_, labels = torch.max(labels.data, 2)
+            _, predicted = torch.max(outputs.data, 1)
+            _, label_types = torch.max(label_types.data, 1)
+            #print(f'labels 2: {labels}, predicted: {predicted}')
+            #total += labels.size(0)
+            total += label_types.size(0)
+            correct += (predicted == label_types).sum().item()
+            #correct += (predicted == labels).sum().item()
+    
+    val_loss = running_loss / len(test_loader)
+    accuracy = 100 * correct / total
+    return val_loss, accuracy
+
+
+@hydra.main(version_base=None, config_path='../../configs/error_prediction', config_name='params.yaml')
 def main(config: DictConfig) -> None:
     
-    model = ErrorPrediction_with_CIGAR(embed_size=config.training.embed_size, 
+    model = ErrorPrediction_with_CIGAR_onlyType(embed_size=config.training.embed_size, 
                                        heads=config.training.heads, 
                                        num_layers=config.training.num_layers,
                                        forward_expansion=config.training.forward_expansion, 
@@ -272,6 +324,12 @@ def main(config: DictConfig) -> None:
                                        dropout_rate=config.training.dropout_rate, 
                                        max_length=config.training.max_length,
                                        output_length=config.training.label_length).to(device)
+    
+    # output model structure
+    #onnx_input = torch.ones((40,256))
+    #print(f'pytorch version: {torch.__version__}', flush=True)
+    #torch.onnx.export(model, onnx_input, 'model.onnx',  # type: ignore
+    #                  input_names=["input sequence"], output_names=["prediction"])
     
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
@@ -283,11 +341,12 @@ def main(config: DictConfig) -> None:
                                                    batch_size=config.training.batch_size,
                                                    train_ratio=config.training.train_ratio)
     
-    train_test(model, train_loader, test_loader, criterion, optimizer, config.training.epochs)
+    train(model, train_loader, test_loader, criterion, optimizer, config)
     
 
 if __name__ == '__main__':
     torch.set_printoptions(threshold=10_000)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    writer = SummaryWriter(f'runs/experiment-{datetime.now().strftime("%Y%m%d-%H%M%S")}')
     print(device, flush=True)
     main()

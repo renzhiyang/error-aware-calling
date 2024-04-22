@@ -1,9 +1,0 @@
-
-data_path:
-  vcf_f: /Users/yangrenzhi/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
-  confident_f: /Users/yangrenzhi/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/HG001_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
-  bam_f: /Users/yangrenzhi/genomeData/ONT_open_datasets/giab_2023.05/analysis/hg001/sup/hg001_chr21.bam
-
-alignment_filter:
-  min_mapping_quality: 10
-  min_base_quality: 10

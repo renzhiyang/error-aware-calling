@@ -1,0 +1,44 @@
+
+data_path:
+  vcf_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/subset/HG001_GRCh38_21_v4.2.1_benchmark.vcf.gz
+  confident_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/subset/HG001_GRCh38_21_v4.2.1_benchmark_noinconsistent.bed
+  bam_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/hg001/sup/chr21.bam
+  ref_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+  label_f: /home/yang1031/projects/error-aware-calling/data/label_chr21_200window_balanced
+  tagged_bam: /home/yang1031/projects/error-aware-calling/data/hg001_chr21_haptagged.bam
+  phased_vcf: /home/yang1031/projects/error-aware-calling/data/hg001_chr21_phased.vcf.gz
+  
+phased_data_path:
+  hg001_ref_tagged_bam: /home/yang1031/projects/error-aware-calling/data/hg001_chr21_haptagged.bam
+  vcf_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/subset/HG001_GRCh38_21_v4.2.1_benchmark.vcf.gz
+  ref_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+
+alignment_filter:
+  min_mapping_quality: 40
+  min_base_quality: 10
+
+label:
+  window_size_half: 200
+
+controller:
+  phased: Y
+  unphased: Y
+
+training:
+  model_path: /home/yang1031/projects/error-aware-calling/src/error-prediction/model_saved
+  out_predix: model_1encoder
+  input_length: 256
+  data_loader_chunk_size: 20
+  batch_size: 40
+  train_ratio: 0.7
+  embed_size: 128
+  num_layers: 1
+  heads: 8
+  forward_expansion: 4
+  num_tokens: 8
+  num_bases: 5
+  dropout_rate: 0.1
+  max_length: 256
+  learning_rate: 0.01
+  epochs: 100
+  label_length: 20
