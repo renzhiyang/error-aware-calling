@@ -236,6 +236,8 @@ def ensure_dir(file_path):
 def train(model, train_loader, test_loader, criterion, optimizer, config):
     save_interval = 10
     epochs = config.training.epochs
+    model_dir = config.training.model_path + '/' + datetime.now().strftime("model-%Y%m%d-%H%M%S/")
+    ensure_dir(model_dir)
     
     for epoch in range(epochs):
         model.train()
@@ -251,9 +253,14 @@ def train(model, train_loader, test_loader, criterion, optimizer, config):
             src_mask = src_mask.to(device)
             #print(f'input: {inputs.shape}, mask:{src_mask.shape}, label:{labels.shape}')
             
-            outputs = model(inputs, src_mask)
+            # with mask, produce nan output. https://github.com/pytorch/pytorch/issues/24816
+            #outputs = model(inputs, src_mask)
+            #without mask
+            outputs = model(inputs)
+            
             #print(f'output shape: {outputs.shape}, label shape: {labels.shape}')
-            #print(outputs)
+            #print(f'outputs: {outputs}')
+            #print(f'labels: {label_types}')
             #loss = criterion(outputs, labels)
             loss = criterion(outputs, label_types)
             loss.backward()
@@ -270,13 +277,11 @@ def train(model, train_loader, test_loader, criterion, optimizer, config):
         print(f'Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}', flush=True)
 
         if (epoch + 1) % save_interval == 0:
-            model_dir = config.training.model_path + '/' + datetime.now().strftime("model-%Y%m%d-%H%M%S/")
-            ensure_dir(model_dir)
             model_save_path = os.path.join(model_dir, f'{config.training.out_predix}_epoch_{epoch+1}.pt')
             torch.save(model.state_dict(), model_save_path)
             model.load_state_dict(torch.load(model_save_path, map_location=device))
             print(f'Model saved at epoch {epoch+1}', flush=True)
-    writer.close()
+    
       
 
 def test(model, test_loader, criterion):
@@ -326,10 +331,12 @@ def main(config: DictConfig) -> None:
                                        output_length=config.training.label_length).to(device)
     
     # output model structure
-    #onnx_input = torch.ones((40,256))
+    onnx_input = torch.ones((40,256))
     #print(f'pytorch version: {torch.__version__}', flush=True)
-    #torch.onnx.export(model, onnx_input, 'model.onnx',  # type: ignore
+    #torch.onnx.export(model, onnx_input, 'model_2class.onnx',  # type: ignore
     #                  input_names=["input sequence"], output_names=["prediction"])
+    # tensorboard visualize model
+    #writer.add_graph(model, onnx_input)
     
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
@@ -342,7 +349,8 @@ def main(config: DictConfig) -> None:
                                                    train_ratio=config.training.train_ratio)
     
     train(model, train_loader, test_loader, criterion, optimizer, config)
-    
+    writer.close()
+
 
 if __name__ == '__main__':
     torch.set_printoptions(threshold=10_000)
