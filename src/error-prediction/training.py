@@ -236,7 +236,7 @@ def ensure_dir(file_path):
 def train(model, train_loader, test_loader, criterion, optimizer, config):
     save_interval = 10
     epochs = config.training.epochs
-    model_dir = config.training.model_path + '/' + datetime.now().strftime("model-%Y%m%d-%H%M%S/")
+    model_dir = config.training.model_path + '/' + start_time
     ensure_dir(model_dir)
     
     for epoch in range(epochs):
@@ -355,6 +355,7 @@ def main(config: DictConfig) -> None:
 if __name__ == '__main__':
     torch.set_printoptions(threshold=10_000)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    writer = SummaryWriter(f'runs/experiment-{datetime.now().strftime("%Y%m%d-%H%M%S")}')
+    start_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+    writer = SummaryWriter(f'runs/experiment-{start_time}')
     print(device, flush=True)
     main()
