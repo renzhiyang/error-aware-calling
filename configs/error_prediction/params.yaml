@@ -31,7 +31,7 @@ training:
   data_loader_chunk_size: 20
   batch_size: 40
   train_ratio: 0.7
-  embed_size: 128
+  embed_size: 256
   num_layers: 1
   heads: 8
   forward_expansion: 4
