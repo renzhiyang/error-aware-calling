@@ -20,7 +20,3 @@ class DataEncoder:
         
         with open(file_path, 'r') as file:
             offset = 0
-            
-            
-        
-
