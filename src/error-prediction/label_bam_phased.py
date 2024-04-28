@@ -1,3 +1,4 @@
+import os
 import pysam
 import hydra
 import gzip
@@ -62,6 +63,10 @@ def load_bed(filename: str):
             regions[chr].append((start_pos, end_pos))
     return regions
 
+def ensure_dir(file_path):
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 def load_ref(filename: str):
     reference = {}
@@ -70,6 +75,12 @@ def load_ref(filename: str):
             reference[entry.name] = entry.sequence
     return reference
 
+def reverse_seq(sequence: str):
+    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    if str is not None:
+        return ''.join(complement[base] for base in sequence[::-1])
+    else:
+        return sequence
 
 # To verify if read in confident regions
 def is_read_in_confident_region(read: pysam.AlignedSegment, confident_regions: list) -> bool:
@@ -93,35 +104,51 @@ def get_phased_read_haplotype(read: pysam.AlignedSegment):
             break
     return haplotype
 
-def get_sequence(full_read_sequence:str, position:int, 
+def get_sequence(full_read_sequence:str, position:int, is_forward:bool,
                         insert_len:int , is_indel:bool, config:DictConfig):
     """
     Extract the sequence around a given position with a specified window size.
     example: half window is 2
     SNV: return AACTT, C is the variant posision, 1 window + 1 base
-    Insertion: true AATT, query AAAATT insert 2 bases, return AAAATT, 1 window + insert bases
-    Deletion: true AACCTT, query AATT delete 2 bases, return AATT, 1 window size
+    Insertion: true AATT, query AAAATT insert 2 bases
+        around return AAAATT, forward return AA 1 window + insert bases
+        read_base AA
+    Deletion: true AACCTT, query AATT delete 2 bases, 
+        around return AATT, forward return AA, 1 window size
     """
     window_half = config.label.window_size_half
+    
+    # if the current read is reverse strand, update the current position
+    if not is_forward:
+        position = len(full_read_sequence) - position - insert_len - 1
+        if is_indel:
+            position += 1
+
     start = max(0, position - window_half)
     # 是否是输出前面的bases，或者是前后的bases
-    if config.controller.seq_around == "TRUE":
-        end = min(len(full_read_sequence), position + insert_len + window_half + 1)
-    else:
+    end = min(len(full_read_sequence), position + insert_len + window_half + 1)
+    if not config.controller.seq_around == True:
         end = min(len(full_read_sequence), position + 1)
     
+    # previous version
     if is_indel:
         return full_read_sequence[start:end-1]
     else:
         return full_read_sequence[start:end]
+    
+    # new version
+    #if is_forward:
+    #    if is_indel:
+            
 
 def get_tag(read, tag_name):
     for tag in read.tags:
         if tag[0] == tag_name:
+            print(tag[1])
             return tag[1]
     return None
 
-def print_label(chrom:str, type:str, position:int, label:str, 
+def print_label(chrom:str, type:str, read_strand:str, position:int, label:str, 
                 read_base:str, ref_base:str, alts:str,
                 is_germline:str, variant_type:str,
                 sequence_around:str, config:DictConfig):
@@ -129,11 +156,21 @@ def print_label(chrom:str, type:str, position:int, label:str,
     Print label to output config.data_path_label_f file.
     position should be change to 1-base
     """
+
+    # don't output the first forward bases (illumina: 100, ONT: 256)
+    if len(sequence_around) < config.label.window_size_half:
+        return
+
+    # reverse read base
+    #if read_strand == "reverse":
+    #    print(f'position:{position}, read base:{read_base}')
+    #    read_base = reverse_seq(read_base)
     
     label_f = open(config.data_path.label_f, "a")
     print(
     f'chrom:{chrom} '
     f'type:{type} '
+    f'read_strand:{read_strand} '
     f'pos_ref:{position} '
     f'label:{label} '
     f'read_base:{read_base} '
@@ -171,7 +208,9 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
     label_count = 0
     tracking_threshold = {30, 60, 90}
     
-    full_read_sequence = read.query_sequence
+    full_read_sequence = read.query_sequence # 得到的是align后的序列，也就是在IGV可以看到的序列，有可能是反向的
+    forward_sequence = read.get_forward_sequence() # 得到的是完全正向的测序序列
+    read_strand = "forward" if read.is_forward else "reverse"
     ref_pos = read.reference_start  
     read_pos = 0
     
@@ -189,12 +228,14 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                 read_base = full_read_sequence[read_pos + i]
                 # mismatch, and non germline variant loci, vcf file variant should change to 1-based.
                 if ref_base != read_base and ref_pos + i + 1  not in variants: 
-                    sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                    sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                           position=read_pos + i, 
+                                                          is_forward = read.is_forward,
                                                           insert_len=0, 
                                                           is_indel=False, 
                                                           config=config)
-                    print_label(chrom=chrom, type='Negative', position=ref_pos+i+1, label=ref_base, 
+                    print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                                position=ref_pos+i+1, label=ref_base, 
                                 read_base=read_base, ref_base=ref_base, 
                                 alts=None, is_germline="No", variant_type="SNV", 
                                 sequence_around=sequence_around, config=config)
@@ -215,12 +256,14 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                 continue
             
             if not is_germline:
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                     position=read_pos, 
+                                                    is_forward = read.is_forward,
                                                     insert_len=len(inserted_bases), 
                                                     is_indel=True,
                                                     config=config)
-                print_label(chrom=chrom, type='Negative', position=ref_pos, label=ref_base, 
+                print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                            position=ref_pos, label=ref_base, 
                             read_base=inserted_bases, ref_base=ref_base, 
                             alts=None, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
@@ -240,12 +283,14 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                 continue
             
             if not is_germline:
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
+                                                  is_forward = read.is_forward,
                                                   insert_len=0, 
                                                   is_indel=True,
                                                   config=config)
-                print_label(chrom=chrom, type='Negative', position=ref_pos, label=ref_base+deleted_bases, 
+                print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                            position=ref_pos, label=ref_base+deleted_bases, 
                             read_base=read_base, ref_base=ref_base+deleted_bases, 
                             alts=None, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
@@ -267,7 +312,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
         progress = (current_pos / read.query_length) * 100
         crossed_threshold = {t for t in tracking_threshold if progress >= t}
         for t in crossed_threshold:
-            print(f"Crossed {t}% threshold at position: {current_pos}, ref pos: {ref_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
+            #print(f"Crossed {t}% threshold at position: {current_pos}, ref pos: {ref_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
             tracking_threshold.remove(t)
          
         
@@ -283,7 +328,9 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
     label_count = 0
     tracking_threshold = {30, 60, 90}
     
-    full_read_sequence = read.query_sequence
+    full_read_sequence = read.query_sequence # 得到的是align后的序列，也就是在IGV可以看到的序列，有可能是反向的
+    forward_sequence = read.get_forward_sequence() # 得到的是完全正向的测序序列
+    read_strand = "forward" if read.is_forward else "reverse"
     ref_pos = read.reference_start
     haplotype_index = get_tag(read, "HP") - 1
     read_pos = 0
@@ -312,17 +359,20 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 if not is_germline and read_base != label:
                     # 对于不是germline variant的位点，只取negative，即read base和reference base不同
                     # read base和reference base相同的情况直接跳过 
-                    sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                    # 需要用到forward_sequence, 完全正向的测序序列
+                    sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                           position=read_pos + i,
+                                                          is_forward = read.is_forward,
                                                           insert_len=0,
                                                           is_indel=False,
                                                           config=config)
                     # 注意：因为打印出来的是要1-base的position，因此要 ref_pos+i+1
                     # 但是Indel的情况是不需要的，因为在记录Indel的时候，往往是以插入或删除块的前一个位点为基准
-                    print_label(chrom=chrom, type='Negative', position=ref_pos+i+1, label=label, 
-                                    read_base=read_base, ref_base=ref_base, 
-                                    alts=alts, is_germline="No", variant_type="SNV", 
-                                    sequence_around=sequence_around, config=config)
+                    print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                                position=ref_pos+i+1, label=label, 
+                                read_base=read_base, ref_base=ref_base, 
+                                alts=alts, is_germline="No", variant_type="SNV", 
+                                sequence_around=sequence_around, config=config)
                     label_count += 1
                 
                 if is_germline:
@@ -332,19 +382,22 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                     is_phased_variant = variants[ref_pos + i + 1]['phased']
                     label = variants[ref_pos + i + 1]['haplotype'][haplotype_index] # variants are 1-based
                     alts = variants[ref_pos + i + 1]['ref_alts']
-                    sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                    sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                           position=read_pos + i,
+                                                          is_forward = read.is_forward,
                                                           insert_len=0,
                                                           is_indel=False,
                                                           config=config)
                     if is_phased_variant:
                         if read_base == label:
-                            print_label(chrom=chrom, type='Positive', position=ref_pos+i+1, label=label, 
+                            print_label(chrom=chrom, type='Positive', read_strand=read_strand, 
+                                        position=ref_pos+i+1, label=label, 
                                         read_base=read_base, ref_base=ref_base, 
                                         alts=alts, is_germline="Yes", variant_type="SNV", 
                                         sequence_around=sequence_around, config=config)
                         else:
-                            print_label(chrom=chrom, type='Negative', position=ref_pos+i+1, label=label, 
+                            print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                                        position=ref_pos+i+1, label=label, 
                                         read_base=read_base, ref_base=ref_base, 
                                         alts=alts, is_germline="Yes", variant_type="SNV", 
                                         sequence_around=sequence_around, config=config)
@@ -372,19 +425,22 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 is_phased_variant = variants[ref_pos]['phased']
                 label = variants[ref_pos]['haplotype'][haplotype_index]
                 alts = variants[ref_pos]['ref_alts']
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
+                                                  is_forward = read.is_forward,
                                                   insert_len=len(inserted_bases), 
                                                   is_indel=True,
                                                   config=config)
                 if is_phased_variant:
                     if ref_base + inserted_bases == label:
-                        print_label(chrom=chrom, type='Positive', position=ref_pos, label=label, 
+                        print_label(chrom=chrom, type='Positive', read_strand=read_strand,
+                                    position=ref_pos, label=label, 
                                     read_base=inserted_bases, ref_base=ref_base, 
                                     alts=alts, is_germline="Yes", variant_type="Insertion", 
                                     sequence_around=sequence_around, config=config)
                     else:
-                        print_label(chrom=chrom, type='Negative', position=ref_pos, label=label, 
+                        print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                                    position=ref_pos, label=label, 
                                     read_base=inserted_bases, ref_base=ref_base, 
                                     alts=alts, is_germline="Yes", variant_type="Insertion", 
                                     sequence_around=sequence_around, config=config)
@@ -397,12 +453,14 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 
             else:
                 '''如果不是germline variant位点的话,被视为是insertion sequencing error'''
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
+                                                  is_forward = read.is_forward,
                                                   insert_len=len(inserted_bases), 
                                                   is_indel=True,
                                                   config=config)
-                print_label(chrom=chrom, type='Negative', position=ref_pos, label=ref_base, 
+                print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                            position=ref_pos, label=ref_base, 
                             read_base=inserted_bases, ref_base=ref_base, 
                             alts=alts, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
@@ -435,20 +493,23 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 is_phased_variant = variants[ref_pos]['phased']
                 label = variants[ref_pos]['haplotype'][haplotype_index]
                 alts = variants[ref_pos]['ref_alts']
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
+                                                  is_forward = read.is_forward,
                                                   insert_len=0, 
                                                   is_indel=True,
                                                   config=config)
                 
                 if is_phased_variant:
                     if ref_base + deleted_bases == label:
-                        print_label(chrom=chrom, type='Positive', position=ref_pos, label=label, 
+                        print_label(chrom=chrom, type='Positive', read_strand=read_strand,
+                                    position=ref_pos, label=label, 
                                     read_base=read_base, ref_base=ref_base+deleted_bases, 
                                     alts=alts, is_germline="Yes", variant_type="Deletion", 
                                     sequence_around=sequence_around, config=config)
                     else:
-                        print_label(chrom=chrom, type='Negative', position=ref_pos, label=label, 
+                        print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                                    position=ref_pos, label=label, 
                                     read_base=read_base, ref_base=ref_base+deleted_bases, 
                                     alts=alts, is_germline="Yes", variant_type="Deletion", 
                                     sequence_around=sequence_around, config=config)
@@ -460,12 +521,14 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 '''
                     如果不是germline variant位点, 则视为sequencing error
                 '''
-                sequence_around = get_sequence(full_read_sequence=full_read_sequence, 
+                sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
+                                                  is_forward = read.is_forward,
                                                   insert_len=0, 
                                                   is_indel=True,
                                                   config=config)
-                print_label(chrom=chrom, type='Negative', position=ref_pos, label=ref_base+deleted_bases, 
+                print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                            position=ref_pos, label=ref_base+deleted_bases, 
                             read_base=read_base, ref_base=ref_base+deleted_bases, 
                             alts=alts, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
@@ -488,7 +551,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
         progress = (current_pos / read.query_length) * 100
         crossed_threshold = {t for t in tracking_threshold if progress >= t}
         for t in crossed_threshold:
-            print(f"Crossed {t}% threshold at position: {current_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
+            #print(f"Crossed {t}% threshold at position: {current_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
             tracking_threshold.remove(t)
     
     return 
@@ -498,9 +561,10 @@ def label_data(chrom: str, read: pysam.AlignedSegment,
                        variants: dict, ref_seq:pysam.FastxFile, 
                        confident_regions: list, config:DictConfig):
     haplotype = get_phased_read_haplotype(read)
-    if haplotype == None and config.controller.unphased == 'TRUE':
+    #print(type(config.controller.unphased),config.controller.unphased)
+    if haplotype == None and config.controller.unphased == True:
         label_unphased_read(chrom, read, ref_seq, variants, confident_regions, config)
-    elif haplotype != None and config.controller.phased == 'TRUE':
+    elif haplotype != None and config.controller.phased == True:
         label_phased_read(chrom, read, ref_seq, variants, confident_regions, config)
     else:
         return
@@ -519,17 +583,17 @@ def generate_label(config):
             continue # Filter reads with lower mapping quality
         
         chrom = bam_file.get_reference_name(read.reference_id)
+        
         if chrom in confident_regions and is_read_in_confident_region(read, confident_regions[chrom]) :
             #new_label_data(chrom, read, variants_dict[chrom], reference[chrom], config)
             label_data(chrom, read, variants[chrom], reference[chrom], confident_regions[chrom], config)
     
-    
 @hydra.main(version_base=None, config_path='../../configs', config_name='defaults.yaml')
 def main(config: DictConfig) -> None:
-    #config = config.label_data
+    config = config.label_data
     #print(config.label.window_size_half, config.data_path.label_f, flush=True)
     print(OmegaConf.to_yaml(config), flush=True)
-    #generate_label(config) 
+    generate_label(config) 
 
 
 if __name__ == '__main__':
