@@ -291,7 +291,8 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                                                   config=config)
                 print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                             position=ref_pos, label=ref_base+deleted_bases, 
-                            read_base=read_base, ref_base=ref_base+deleted_bases, 
+                            read_base=read_base + len(deleted_bases)*'-', 
+                            ref_base=ref_base+deleted_bases, 
                             alts=None, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
                 label_count += 1
@@ -322,7 +323,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                         confident_regions: list, 
                         config:DictConfig):
     # Output the current query name and query length
-    print(f'Phased read: {read.query_name}, length: {read.query_length}', flush=True)
+    #print(f'Phased read: {read.query_name}, length: {read.query_length}', flush=True)
     # Track the progress of program
     current_pos = 0
     label_count = 0
@@ -379,10 +380,16 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                     #对于是germline variant的位点，还要分两种情况：1.phased variant；2.unphased variant
                     #1. phased variant: positive和negative分别是read base和haplotype base相同和不同
                     #2. unphased variant:排除在外，不考虑这种情况，直接跳过
+                    
+                    # 补充情况: 对于类似ch1:40702341的情况，haplotypes: CT, C. label: CT, 此时的read base
+                    # 是C，按照之前的算法会被判定为是Negative SNV；因此还需要看后几个base是否和label相同
+                    # 如果后面是T，那么CT=label，是正确的
+                    # 对于这种请款，CT应该放入deletion的情况中处理，这里只处理SNV，因此需要判断read和label长度是否一致
                     is_phased_variant = variants[ref_pos + i + 1]['phased']
                     label = variants[ref_pos + i + 1]['haplotype'][haplotype_index] # variants are 1-based
                     alts = variants[ref_pos + i + 1]['ref_alts']
-                    sequence_around = get_sequence(full_read_sequence=forward_sequence, 
+                           
+                    sequence_around = get_sequence(full_read_sequence=forward_sequence,  # type: ignore
                                                           position=read_pos + i,
                                                           is_forward = read.is_forward,
                                                           insert_len=0,
@@ -395,7 +402,8 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                         read_base=read_base, ref_base=ref_base, 
                                         alts=alts, is_germline="Yes", variant_type="SNV", 
                                         sequence_around=sequence_around, config=config)
-                        else:
+                        elif len(read_base) == len(label):
+                            #必须要长度相同的情况下，才可以作为SNV
                             print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                                         position=ref_pos+i+1, label=label, 
                                         read_base=read_base, ref_base=ref_base, 
@@ -407,6 +415,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
         
         elif cigar_op == 1: # insertion to the reference    
             inserted_bases = full_read_sequence[read_pos: read_pos + length]
+            read_base = full_read_sequence[read_pos - 1]
             ref_base = ref_seq[ref_pos - 1] # insertion是以插入bases的前一个位点为基准
             is_germline = True if ref_pos in variants else False
             alts = None
@@ -432,16 +441,18 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                                   is_indel=True,
                                                   config=config)
                 if is_phased_variant:
-                    if ref_base + inserted_bases == label:
+                    combined = read_base + inserted_bases
+                    if combined == label:
                         print_label(chrom=chrom, type='Positive', read_strand=read_strand,
                                     position=ref_pos, label=label, 
-                                    read_base=inserted_bases, ref_base=ref_base, 
+                                    read_base=combined, ref_base=ref_base, 
                                     alts=alts, is_germline="Yes", variant_type="Insertion", 
                                     sequence_around=sequence_around, config=config)
-                    else:
+                    elif len(combined) != len(label): 
+                        #排除掉insertion中有测序错误的情况，只是标记insertion error
                         print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                                     position=ref_pos, label=label, 
-                                    read_base=inserted_bases, ref_base=ref_base, 
+                                    read_base=combined, ref_base=ref_base, 
                                     alts=alts, is_germline="Yes", variant_type="Insertion", 
                                     sequence_around=sequence_around, config=config)
                     label_count += 1
@@ -492,6 +503,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 '''
                 is_phased_variant = variants[ref_pos]['phased']
                 label = variants[ref_pos]['haplotype'][haplotype_index]
+                another_hap = variants[ref_pos]['haplotype'][1 - haplotype_index]
                 alts = variants[ref_pos]['ref_alts']
                 sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
@@ -501,6 +513,33 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                                   config=config)
                 
                 if is_phased_variant:
+                    '''
+                    #TODO: 不够完善, 目前还是只提取出positive的samples
+                    Positive的情况: len(deleted_bases) == len(another_hap) - len(label)
+                    Negative的情况: 
+                        1. read_base != label and len(read_base) != len(label) 
+                    example: 
+                        haps ['AACTT', 'A'], 
+                        hap1: AACTT, read: A + any number deletion ---- Negative
+                        hap2: A, read: A + 4del ---- Positive
+                        hap2: A, read: A + other number del ---- Negative
+                    '''
+                    if len(deleted_bases) == len(another_hap) - len(label):
+                        print_label(chrom=chrom, type='Positive', read_strand=read_strand,
+                                    position=ref_pos, label=label, 
+                                    read_base=read_base + len(deleted_bases)*'-', 
+                                    ref_base=ref_base+deleted_bases, 
+                                    alts=alts, is_germline="Yes", variant_type="Deletion", 
+                                    sequence_around=sequence_around, config=config)
+                    #elif:
+                    #    print_label(chrom=chrom, type='Negative', read_strand=read_strand,
+                    #                position=ref_pos, label=label, 
+                    #                read_base=read_base + len(deleted_bases)*'-', 
+                    #                ref_base=ref_base+deleted_bases, 
+                    #                alts=alts, is_germline="Yes", variant_type="Deletion", 
+                    #                sequence_around=sequence_around, config=config)
+                    '''
+                    # previous version, with bugs
                     if ref_base + deleted_bases == label:
                         print_label(chrom=chrom, type='Positive', read_strand=read_strand,
                                     position=ref_pos, label=label, 
@@ -513,6 +552,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                     read_base=read_base, ref_base=ref_base+deleted_bases, 
                                     alts=alts, is_germline="Yes", variant_type="Deletion", 
                                     sequence_around=sequence_around, config=config)
+                    '''
                     label_count += 1
                     # print test
                     #print(f'ref_pos:{ref_pos}, ref_base:{ref_base}, label:{label}, alts:{alts}, deleted_bases:{deleted_bases}'
@@ -529,7 +569,8 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                                   config=config)
                 print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                             position=ref_pos, label=ref_base+deleted_bases, 
-                            read_base=read_base, ref_base=ref_base+deleted_bases, 
+                            read_base=read_base + len(deleted_bases)*'-', 
+                            ref_base=ref_base+deleted_bases, 
                             alts=alts, is_germline="No", variant_type="Deletion", 
                             sequence_around=sequence_around, config=config)
                 label_count += 1
@@ -594,7 +635,6 @@ def main(config: DictConfig) -> None:
     #print(config.label.window_size_half, config.data_path.label_f, flush=True)
     print(OmegaConf.to_yaml(config), flush=True)
     generate_label(config) 
-
 
 if __name__ == '__main__':
     main()
