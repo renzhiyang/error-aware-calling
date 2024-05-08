@@ -96,6 +96,57 @@ class ErrorPrediction_with_CIGAR_onlyType(ErrorPrediction_with_CIGAR):
         #outputs = -nn.functional.log_softmax(outputs, dim=1)
         outputs = nn.functional.log_softmax(outputs, dim=1)
         return outputs
+
+class ErrorPrediction(nn.Module):
+    def __init__(self, embed_size, heads=8, num_layers=1, num_class_1=5, num_class_2=25,
+                 forward_expansion=4, num_tokens=8, num_bases=5, dropout_rate=0.1,
+                 max_length=250, output_length=20):
+        super(ErrorPrediction, self).__init__()
+        self.embed_size = embed_size
+        self.output_length = output_length
+        self.num_bases = num_bases
+        self.token_embedding = nn.Embedding(num_tokens, embed_size)
+        self.position_embedding = nn.Embedding(max_length, embed_size)
+        self.layers = nn.ModuleList([
+            nn.TransformerEncoderLayer(embed_size, heads, forward_expansion, dropout=0.1)
+            for _ in range(num_layers)
+        ])
+        self.dropout = nn.Dropout(dropout_rate)
+        self.classifer_1 = nn.Linear(embed_size * max_length, num_class_1)
+        self.classifer_2 = nn.Linear(embed_size * max_length, num_class_2)
+        self.init_weights()
+    
+    def init_weights(self) -> None:
+        initrange = 0.1
+        for later in self.layers:
+            for p in later.parameters():
+                p.data.uniform_(-initrange, initrange)
+        self.token_embedding.weight.data.uniform_(-initrange, initrange)
+        self.position_embedding.weight.data.uniform_(-initrange, initrange)
+        self.classifer_1.bias.data.zero_()
+        self.classifer_1.weight.data.uniform_(-initrange, initrange)
+        self.classifer_2.bias.data.zero_()
+        self.classifer_2.weight.data.uniform_(-initrange, initrange)
+        
+    def forward(self, x):
+        x = x.long()
+        batch_size, seq_length = x.size()
+        #print(f'input shape: {x.shape}') # 40x99
+        embeddings = self.token_embedding(x).to(x.device)
+        #print(f'embedding shape: {embeddings.shape}') # 40x99x256
+        positions = torch.arange(0, seq_length).unsqueeze(0).expand(batch_size, seq_length).to(x.device)
+        
+        x = self.dropout(embeddings + self.position_embedding(positions))
+        
+        for layer in self.layers:
+            x = layer(x)
+        #print(f'after Transformer shape: {x.shape}') # 40x99x256
+        x = x.view(x.size(0), -1)
+        
+        output_1 = self.classifer_1(x)
+        output_2 = self.classifer_2(x)
+        #print(f'out1 shape: {output_1.shape}, out2 shape: {output_2.shape}') # 40x5, 40x25
+        return output_1, output_2 
         
 
 class PositionEncoding(nn.Module):
