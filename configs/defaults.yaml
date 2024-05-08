@@ -1,3 +1,2 @@
 defaults:
-  - error_prediction: params
   - label_data: chr1
