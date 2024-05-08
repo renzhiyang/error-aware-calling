@@ -248,6 +248,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
         
         elif cigar_op == 1: # insertion to the reference
             ref_base = ref_seq[ref_pos - 1]
+            read_base = full_read_sequence[read_pos - 1]
             inserted_bases = full_read_sequence[read_pos:read_pos + length]
             is_germline = True if ref_pos in variants else False
             
@@ -256,6 +257,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                 continue
             
             if not is_germline:
+                combined = read_base + inserted_bases
                 sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                     position=read_pos, 
                                                     is_forward = read.is_forward,
@@ -264,7 +266,7 @@ def label_unphased_read(chrom:str, read:pysam.AlignedSegment,
                                                     config=config)
                 print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                             position=ref_pos, label=ref_base, 
-                            read_base=inserted_bases, ref_base=ref_base, 
+                            read_base=combined, ref_base=ref_base, 
                             alts=None, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
                 label_count += 1
@@ -464,6 +466,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                 
             else:
                 '''如果不是germline variant位点的话,被视为是insertion sequencing error'''
+                combined = read_base + inserted_bases
                 sequence_around = get_sequence(full_read_sequence=forward_sequence, 
                                                   position=read_pos, 
                                                   is_forward = read.is_forward,
@@ -472,7 +475,7 @@ def label_phased_read(chrom:str, read:pysam.AlignedSegment,
                                                   config=config)
                 print_label(chrom=chrom, type='Negative', read_strand=read_strand,
                             position=ref_pos, label=ref_base, 
-                            read_base=inserted_bases, ref_base=ref_base, 
+                            read_base=combined, ref_base=ref_base, 
                             alts=alts, is_germline="No", variant_type="Insertion", 
                             sequence_around=sequence_around, config=config)
                 label_count += 1
