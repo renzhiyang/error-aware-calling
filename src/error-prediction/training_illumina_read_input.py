@@ -13,7 +13,7 @@ from datetime import datetime
 #from sklearn.metrics import precision_score, recall_score, f1_score
 from torch.utils.data import random_split
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 
         
 def ont_hot_encoding(label_array, num_class: int):
