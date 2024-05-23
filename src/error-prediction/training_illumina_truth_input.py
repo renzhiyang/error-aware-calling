@@ -171,7 +171,7 @@ def main(config: DictConfig) -> None:
     #torch.onnx.export(model, onnx_input, 'model_2class.onnx',  # type: ignore
     #                  input_names=["input sequence"], output_names=["prediction"])
     # tensorboard visualize model
-    #writer.add_graph(model, onnx_input)
+    writer.add_graph(model, onnx_input)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate)
     train(model, train_loader, test_loader, criterion, optimizer, config)
