@@ -28,8 +28,9 @@ class Data_Loader:
             for line in file:
                 if self.total_lines % self.chunk_size == 0:
                     self.line_offsets.append(offset)
-                    offset += len(line)
-                    self.total_lines += 1
+                offset += len(line)
+                self.total_lines += 1
+        print(self.total_lines)
         
     def __len__(self):
         return self.total_lines
@@ -63,6 +64,28 @@ class Data_Loader:
         
         array = np.array(array, dtype=np.float32)
         return array
+    
+    def input_tokenization_onehot(self, input_seq: str):
+        '''
+            Encode input sequence
+        '''
+        len_vocab = len(VOCAB)
+        # 排除掉不足99个base的
+        array = [VOCAB[char] for char in input_seq]
+        if len(array) != self.config.training.up_seq_len:
+            print(f'len array:{len(array)}, array:{array}'
+                  f'input seq: {input_seq}')
+            return None
+        
+        one_hot_array = []
+        for value in array:
+            if value == 1:
+                one_hot_array.append(np.zeros(len_vocab))
+            else:
+                one_hot_array.append(np.eye(len_vocab)[int(value) - 1])
+        one_hot_array = np.array(one_hot_array, dtype=np.float32)
+        #print(f'array shape: {one_hot_array.shape}, {one_hot_array}')
+        return one_hot_array
 
 
     def label_tokenization(self, label_1: str, label_2: str):
@@ -104,7 +127,8 @@ class Data_Loader:
         
         #print(data_dict['pos'], label_1, label_2)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
-        input_array = self.input_tokenization(up_seq)
+        input_array = self.input_tokenization(up_seq) # without one hot encoding 
+        #input_array = self.input_tokenization_onehot(up_seq) # with one hot encoding 
         #return input_array, label_array_1, label_array_2
         return [(input_array, label_array_1, label_array_2)]
     
@@ -123,6 +147,7 @@ class Data_Loader:
             label_2 = 'rep' + str(len(label_2))
         
         input_array = self.input_tokenization(up_seq)
+        #input_array = self.input_tokenization_onehot(up_seq)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
         return [(input_array, label_array_1, label_array_2)]
     
@@ -141,6 +166,7 @@ class Data_Loader:
             label_1 = read_base[i]
             label_2 = 'N'
             input_array = self.input_tokenization(up_seq)
+            #input_array = self.input_tokenization_onehot(up_seq)
             label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
             deletion_samples.append((input_array, label_array_1, label_array_2))
         return deletion_samples
@@ -148,7 +174,7 @@ class Data_Loader:
     def __getitem__(self, idx):
         chunk_idx = idx // self.chunk_size
         line_idx = idx % self.chunk_size
-        
+
         with open(self.file_path, 'r') as file:
             file.seek(self.line_offsets[chunk_idx])
             for _ in range(line_idx):
@@ -159,7 +185,7 @@ class Data_Loader:
             data_dict = self.load_line(line)
             
             # skip insertion length > 6
-            if len(data_dict['label']) > 7 and data_dict['variant_type'] == 'Insertion':
+            if len(data_dict['read_base']) > 7 and data_dict['variant_type'] == 'Insertion':
                 return None
             if data_dict['variant_type'] in ['SNV', 'Insertion','Deletion'] and len(data_dict['seq_around'])!= 100:
                 return None

@@ -1,6 +1,8 @@
+from json import encoder
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class ErrorPrediction_with_CIGAR(nn.Module):
     def __init__(self, embed_size, heads, num_layers, 
@@ -99,7 +101,7 @@ class ErrorPrediction_with_CIGAR_onlyType(ErrorPrediction_with_CIGAR):
 
 class ErrorPrediction(nn.Module):
     def __init__(self, embed_size, heads=8, num_layers=1, num_class_1=5, num_class_2=25,
-                 forward_expansion=4, num_tokens=8, num_bases=5, dropout_rate=0.1,
+                 forward_expansion=4, num_tokens=6, num_bases=5, dropout_rate=0.1,
                  max_length=250, output_length=20):
         super(ErrorPrediction, self).__init__()
         self.embed_size = embed_size
@@ -107,20 +109,34 @@ class ErrorPrediction(nn.Module):
         self.num_bases = num_bases
         self.token_embedding = nn.Embedding(num_tokens, embed_size)
         self.position_embedding = nn.Embedding(max_length, embed_size)
-        self.layers = nn.ModuleList([
-            nn.TransformerEncoderLayer(embed_size, heads, forward_expansion, dropout=0.1)
-            for _ in range(num_layers)
-        ])
+        self.position_encoding = PositionEncoding(d_model=6,max_len=max_length)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=embed_size,
+                                                   nhead=heads,
+                                                   activation='relu',
+                                                   batch_first=True,
+                                                   dropout=dropout_rate)
+        self.layers = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        #self.layers = nn.ModuleList([
+        #    nn.TransformerEncoderLayer(d_model=embed_size,
+        #                               nhead=heads, 
+        #                               activation='relu',
+        #                               batch_first=True,
+        #                               dropout=dropout_rate)
+        #    for _ in range(num_layers)
+        #])
+        #self.pooling = nn.AdaptiveAvgPool1d(1)
         self.dropout = nn.Dropout(dropout_rate)
+        self.relu = nn.ReLU()
+        #self.fc = nn.Linear(embed_size * max_length, 256)
         self.classifer_1 = nn.Linear(embed_size * max_length, num_class_1)
         self.classifer_2 = nn.Linear(embed_size * max_length, num_class_2)
         self.init_weights()
     
     def init_weights(self) -> None:
         initrange = 0.1
-        for later in self.layers:
-            for p in later.parameters():
-                p.data.uniform_(-initrange, initrange)
+        #for later in self.layers:
+        #    for p in later.parameters():
+        #        p.data.uniform_(-initrange, initrange)
         self.token_embedding.weight.data.uniform_(-initrange, initrange)
         self.position_embedding.weight.data.uniform_(-initrange, initrange)
         self.classifer_1.bias.data.zero_()
@@ -130,24 +146,35 @@ class ErrorPrediction(nn.Module):
         
     def forward(self, x):
         x = x.long()
-        batch_size, seq_length = x.size()
+        #print(x.shape)
+        #batch_size, seq_length, _ = x.size() # one-hot encoding
+        batch_size, seq_length = x.size() # nn.embedding
         #print(f'input shape: {x.shape}') # 40x99
-        embeddings = self.token_embedding(x).to(x.device)
+        #embeddings = self.token_embedding(x).to(x.device)
+        
         #print(f'embedding shape: {embeddings.shape}') # 40x99x256
-        positions = torch.arange(0, seq_length).unsqueeze(0).expand(batch_size, seq_length).to(x.device)
+        #positions = torch.arange(0, seq_length).unsqueeze(0).expand(batch_size, seq_length).to(x.device)
+        x = self.token_embedding(x)
+        x = self.position_encoding(x)
+        #print(f'after position: {x.shape}')
         
-        x = self.dropout(embeddings + self.position_embedding(positions))
-        
-        for layer in self.layers:
-            x = layer(x)
-        #print(f'after Transformer shape: {x.shape}') # 40x99x256
+        #x = self.dropout(x + self.position_embedding(positions)) # without embedding
+        #x = self.dropout(embeddings - self.position_embedding(positions)) # with embedding
+        x = self.layers(x)
+        #x = x.mean(dim=1)
+        #for layer in self.layers:
+        #    x = layer(x)
+        #print(f'after Transformer:{x[0][0]}')
+        #print(f'after Transformer shape: {x.shape}') # 40x99x16
+        #x = x.permute(0, 2, 1)
+        #x = self.pooling(x)
         x = x.view(x.size(0), -1)
-        
+        #x = self.relu(self.fc(x))
         output_1 = self.classifer_1(x)
         output_2 = self.classifer_2(x)
+        #3print(f'first: {output_1[0:2]}, second:{output_2[0:2]}')
         #print(f'out1 shape: {output_1.shape}, out2 shape: {output_2.shape}') # 40x5, 40x25
-        return output_1, output_2 
-        
+        return output_1, output_2   
 
 class PositionEncoding(nn.Module):
 
@@ -167,11 +194,96 @@ class PositionEncoding(nn.Module):
         Arguments:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
-        print(x.shape)
-        print(self.pe[:x.size(0)].shape)
+        #print(x.shape)
+        #print(self.pe[:x.size(0)].shape)
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
+
+class LSTM(nn.Module):
+    def __init__(self, num_tokens=6, embed_size=8, num_class_1=5, num_class_2=25, hidden_dim=128, 
+                 num_layers=1, dropout_rate=0.1):
+        super(LSTM, self).__init__()
+        self.embedding = nn.Embedding(num_tokens, embed_size)
+        self.conv1 = nn.Conv1d(in_channels=embed_size, out_channels=128, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=128, kernel_size=5, padding=2)
+        self.pool = nn.MaxPool1d(kernel_size=2)
+        self.lstm = nn.LSTM(input_size=128, hidden_size=hidden_dim, num_layers=num_layers,
+                            batch_first=True, dropout=dropout_rate)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.fc1 = nn.Linear(hidden_dim, num_class_1)
+        self.fc2 = nn.Linear(hidden_dim, num_class_2)
+    
+    def forward(self, x):
+        print(f'input shape: {x.shape}')
+        x = x.long()
+        x = self.embedding(x)
+        #print(f'after embedding: {x.shape}')
+        x = x.permute(0, 2, 1)
+        #print(f'after permute: {x.shape}')
+        
+        x = self.conv1(x)
+        x = nn.ReLU()(x)
+        #print(f'after conv1: {x.shape}')
+        x = self.conv2(x)
+        x = nn.ReLU()(x)
+        #print(f'after conv2: {x.shape}')
+        x = self.pool(x)
+        #print(f'after pool: {x.shape}')
+        
+        x = x.permute(0, 2, 1)
+        #print(f'after permute 2: {x.shape}')
+        x, _ = self.lstm(x)
+        #print(f'after lstm: {x.shape}')
+        x = x[:, -1, :]
+        #print(f'after: {x.shape}')
+        output_1 = self.fc1(x)
+        output_2 = self.fc2(x)
+        
+        return output_1, output_2
+
+class conv_model(nn.Module):
+    def __init__(self, channels=6, num_class_1=5, num_class_2=25, 
+                dropout_rate=0.1):
+        super(conv_model, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=channels, out_channels=32, kernel_size=11, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=11, padding=1)
+        self.pool = nn.MaxPool1d(kernel_size=2)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.fc1 = nn.Linear(64*24, 128)
+        self.fc2_1 = nn.Linear(128, num_class_1)
+        self.fc2_2 = nn.Linear(128, num_class_2)
+    
+    def forward(self, x):
+        x = x.float()
+        x = x.permute(0, 2, 1)
+        #print(f'input shap: {x.shape}')
+        x = self.conv1(x)
+        #print(f'after conv1: {x.shape}')
+        x = nn.ReLU()(x)
+        x = self.pool(x)
+        #print(f'after pool1: {x.shape}')
+        
+        x = self.conv2(x)
+        #print(f'after conv2: {x.shape}')
+        x = nn.ReLU()(x)
+        x = self.pool(x)
+        #print(f'after pool2: {x.shape}')
+        
+        x = x.view(x.size(0), -1)
+        #print(f'after view: {x.shape}')
+        x = self.fc1(x)
+        #print(f'after fc1: {x.shape}')
+        x = nn.ReLU()(x)
+        x = self.dropout(x)
+        
+        output_1 = self.fc2_1(x)
+        #print(f'out1: {output_1.shape}')
+        output_2 = self.fc2_2(x)
+        #print(f'out2: {output_2.shape}')
+        
+        return output_1, output_2
 
 def generate_mask(src):
     mask = (torch.triu(torch.ones(src, src))==1).transpose(0,1)
     return mask
+    
