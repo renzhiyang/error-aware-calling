@@ -1,3 +1,6 @@
+# input: one-hot encoding for each base
+# output: one-hot encoding for each class
+
 import os
 import numpy as np
 
@@ -127,8 +130,8 @@ class Data_Loader:
         
         #print(data_dict['pos'], label_1, label_2)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
-        input_array = self.input_tokenization(up_seq) # without one hot encoding 
-        #input_array = self.input_tokenization_onehot(up_seq) # with one hot encoding 
+        #input_array = self.input_tokenization(up_seq) # without one hot encoding 
+        input_array = self.input_tokenization_onehot(up_seq) # with one hot encoding 
         #return input_array, label_array_1, label_array_2
         return [(input_array, label_array_1, label_array_2)]
     
@@ -146,8 +149,8 @@ class Data_Loader:
         if len(label_2) >= 3:
             label_2 = 'rep' + str(len(label_2))
         
-        input_array = self.input_tokenization(up_seq)
-        #input_array = self.input_tokenization_onehot(up_seq)
+        #input_array = self.input_tokenization(up_seq)
+        input_array = self.input_tokenization_onehot(up_seq)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
         return [(input_array, label_array_1, label_array_2)]
     
@@ -165,8 +168,8 @@ class Data_Loader:
             up_seq = seq_around[i:] + '-'*i
             label_1 = read_base[i]
             label_2 = 'N'
-            input_array = self.input_tokenization(up_seq)
-            #input_array = self.input_tokenization_onehot(up_seq)
+            #input_array = self.input_tokenization(up_seq)
+            input_array = self.input_tokenization_onehot(up_seq)
             label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
             deletion_samples.append((input_array, label_array_1, label_array_2))
         return deletion_samples
