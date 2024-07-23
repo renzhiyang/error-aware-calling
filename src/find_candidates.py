@@ -120,7 +120,7 @@ def get_candidates(args):
                       flush=True)
         del pileup[zero_based_position]
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description='find candidtate variants')
     parser.add_argument('--ref_fn', type=str, help="reference file name",
                         default="", required=True)
@@ -143,7 +143,9 @@ if __name__ == '__main__':
                         required=True)
     parser.add_argument('--ctg_end', type=int, help="end position of sequence",
                         required=True)
-    
     args = parser.parse_args()
     
     get_candidates(args)
+
+if __name__ == '__main__':
+    main()
