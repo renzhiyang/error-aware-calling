@@ -12,6 +12,7 @@
 
 import sys
 import shlex
+import utils
 import argparse
 
 from subprocess import PIPE, Popen
@@ -19,10 +20,6 @@ from collections import defaultdict
 
 from sklearn import base
 
-from utils import IUPAC_base_to_ACGT_base_dict
-
-def process_base(base):
-    return base if base == "N" else IUPAC_base_to_ACGT_base_dict[base]
 
 def reference_sequence_from(samtools, fasta, regions):
     region_str = " ".join(regions)
@@ -50,7 +47,6 @@ def exclude_many_clipped_bases_read(CIGAR):
 def preprocess_read(row, ctg_name, minimum_mapping_quality,
                     pileup):
     columns = row.strip().split()
-    print(columns)
     if columns[0][0] == "@" or columns[2] != ctg_name or int(columns[4]) < minimum_mapping_quality:
         return
     
@@ -74,7 +70,7 @@ def preprocess_read(row, ctg_name, minimum_mapping_quality,
             
         elif b in "MX=":
             for _ in range(length):
-                base = process_base(SEQ[query_position])
+                base = utils.process_base(SEQ[query_position])
                 pileup[reference_position][base] += 1
                 reference_position += 1
                 query_position += 1
@@ -89,7 +85,6 @@ def preprocess_read(row, ctg_name, minimum_mapping_quality,
 
         length = 0
     
-
 def get_candidates(args):
     samtools = args.samtools
     fasta_file = args.ref_fn
@@ -101,8 +96,12 @@ def get_candidates(args):
         print("[ERROR] Failed to load reference sequence.", file=sys.stderr)
         sys.exit(1)
     
-    with Popen(shlex.split(f"{samtools} view {args.bam_fn} {' '.join(regions)}"), stdout=PIPE) as p:
+    counts = 0
+    with Popen(shlex.split(f"{samtools} view {args.bam_fn} {args.ctg_name} {' '.join(regions)}"), stdout=PIPE) as p:
         for row in p.stdout: # type: ignore
+            #counts += 1
+            #if counts % 10000 == 0:
+            #    print(counts, flush=True)
             preprocess_read(row.decode(), args.ctg_name, args.min_mq, pileup)
     
     positions = sorted(pileup.keys())
