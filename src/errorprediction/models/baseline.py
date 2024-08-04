@@ -1,6 +1,4 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class BasicBlock(nn.Module):
@@ -103,4 +101,3 @@ class Baseline(nn.Module):
         output_1 = self.classifer1(features)
         output_2 = self.classifer2(features)
         return output_1, output_2
-
