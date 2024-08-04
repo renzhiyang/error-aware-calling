@@ -1,7 +1,9 @@
 import pysam
 
-phased_vcf="/home/yang1031/projects/error-aware-calling/data/hg001_chr21_phased.vcf.gz"
-out_tsv="/home/yang1031/projects/error-aware-calling/data/hg001_chr21_phased.tsv"
+phased_vcf = (
+    "/home/yang1031/projects/error-aware-calling/data/hg001_chr21_phased.vcf.gz"
+)
+out_tsv = "/home/yang1031/projects/error-aware-calling/data/hg001_chr21_phased.tsv"
 # Open the phased VCF file
 vcf = pysam.VariantFile(phased_vcf)
 
@@ -21,11 +23,13 @@ with open(out_tsv, "w") as output:
 
         # Extract the phased genotype information (assuming a single sample VCF)
         # This will look like (0|1) for heterozygous variants
-        genotype = record.samples[0]['GT']
+        genotype = record.samples[0]["GT"]
 
         # Determine the haplotype assignments
         haplotype_1 = genotype[0]
         haplotype_2 = genotype[1] if len(genotype) > 1 else "."
 
         # Write the variant and its haplotype information to the output file
-        output.write(f"{chrom}\t{pos}\t{var_id}\t{ref}\t{alt}\t{haplotype_1}\t{haplotype_2}\n")
+        output.write(
+            f"{chrom}\t{pos}\t{var_id}\t{ref}\t{alt}\t{haplotype_1}\t{haplotype_2}\n"
+        )
