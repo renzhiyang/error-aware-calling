@@ -1,8 +1,6 @@
 import itertools
 import src.utils as utils
 
-from collections import Counter
-
 
 class GenotypeCaller:
     def __init__(self, reads, error_prob=0.003):
@@ -56,7 +54,13 @@ class BayesianCaller:
     def likelihood_per_read(alleles, observed_base, cur_b_d, next_b_d):
         """
         给定当前read的训练好的distributions, 计算在genotype下, 观察到observed_base的概率
+        输入：当前read的distributions,所有的alleles
+        输出：给出每一个allele的likelihood
         """
+        likelihoods = {}
+
+        for allele, (allele_base, allele_insertion) in alleles.items():
+            
         return None
 
     def posterior_prob_of_genotype(self, genotype):

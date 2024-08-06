@@ -90,6 +90,7 @@ class ALLELES:
                     continue
                 key = f"insertion_{first}_{second}"
                 self.allele_dict[key] = (first, second)
+        print(self.allele_dict)
 
 
 def process_base(base):

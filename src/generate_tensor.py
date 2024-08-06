@@ -3,10 +3,11 @@ import h5py
 import shlex
 import argparse
 import numpy as np
+from torch import copysign
 
 import src.utils as utils
 
-from subprocess import PIPE, Popen
+from subprocess import PIPE, Popen, check_call
 
 
 def candidate_information_from(candidate_line):
@@ -86,6 +87,9 @@ def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
 
         elif b in "MX=":
             for _ in range(length):
+                if pointer >= end_pos:
+                    stop = True
+                    break
                 query_base = query_seq[query_index]
                 ref_base = ref_seq[ref_index]
                 if ref_base == "M":
@@ -96,9 +100,9 @@ def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
                 query_index += 1
                 pointer += 1
 
-                if pointer >= end_pos:  # if reach the candidate position, then return
-                    stop = True
-                    break
+                # if pointer >= end_pos:  # if reach the candidate position, then return
+                #   stop = True
+                #   break
 
         elif b == "I":
             inserted = "-" * length
@@ -107,13 +111,17 @@ def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
 
         elif b == "D":
             for _ in range(length):
+                if pointer >= end_pos:  # if reach the candidate position, then
+                    stop = True
+                    break
                 delete_base = ref_seq[ref_index]
                 final_ref.append(delete_base)
                 ref_index += 1
                 pointer += 1
-                if pointer >= end_pos:  # if reach the candidate position, then
-                    stop = True
-                    break
+
+                # if pointer >= end_pos:  # if reach the candidate position, then
+                #   stop = True
+                #   break
         length = 0
     final_ref = "".join(final_ref)
 
@@ -127,6 +135,40 @@ def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
         print(f'que: {query_seq[-10:]}\n')
     """
     return final_ref
+
+
+def get_query_base(query_seq, cigar, ref_start, candidate_pos):
+    cur_base = ""
+    next_ins = "N"
+    length = 0
+    query_index = 0
+    ref_index = ref_start
+
+    for b in cigar:
+        if b.isdigit():
+            length = length * 10 + int(b)
+            continue
+
+        if b == "S":
+            query_index += length
+
+        elif b in "MX=":
+            for _ in range(length):
+                if ref_index <= candidate_pos:
+                    cur_base = query_seq[query_index]
+                query_index += 1
+                ref_index += 1
+        elif b == "I":
+            if ref_index == candidate_pos + 1:
+                next_ins = query_seq[query_index : query_index + length]
+            query_index += length
+        elif b == "D":
+            for _ in range(length):
+                if ref_index <= candidate_pos:
+                    cur_base = "-"
+                ref_index += 1
+        length = 0
+    return cur_base, next_ins
 
 
 def get_tensor_sequence_from(read, candidate_pos, window_width):
@@ -151,19 +193,25 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
             MD = field[5:]
             break
 
-    if MD == None:
+    if MD is None:
         print()
 
     # get the previous reference bases before the current candidate position
     ref_seq = reconstruct_ref_seq(SEQ, MD, CIGAR, QUERY_POS, CAN_POS)
-    num_padding = 0
+    cur_base, next_ins = get_query_base(SEQ, CIGAR, QUERY_POS, CAN_POS)
     if window_width > len(ref_seq):
         padding_seq = (window_width - len(ref_seq)) * "N"  # 'N' represent padding base
         ref_seq = padding_seq + ref_seq
     else:
         ref_seq = ref_seq[len(ref_seq) - window_width :]
 
-    return ref_seq
+        # if next_ins != "N":
+        if cur_base == "-":
+            print(
+                f"start_pos: {QUERY_POS}, end_pos: {CAN_POS}, cur_base: {cur_base}, next_ins: {next_ins}"
+            )
+            print(f"ref_seq: {ref_seq}")
+    return ref_seq, cur_base, next_ins
 
 
 def create_tensor(args):
@@ -184,19 +232,24 @@ def create_tensor(args):
         )
         reads = subprocess.stdout  # type: ignore
 
-        if reads == None:
+        if reads is None:
             continue
 
         for i, read in enumerate(reads):
-            tensor_sequence = get_tensor_sequence_from(
+            tensor_sequence, cur_base, next_ins = get_tensor_sequence_from(
                 read, candidate_pos, window_width
             )
             tensor_one_hot = utils.one_hot_seq(tensor_sequence)
             # Create a dataset for the position
             grp = output_h5.create_group(f"pos_{candidate_pos}_{i}")
             grp.create_dataset("position", data=candidate_pos)
-            grp.create_dataset("tensor_one_hot", data=tensor_one_hot)
-
+            grp.create_dataset(
+                "tensor_one_hot",
+                data=tensor_one_hot,
+            )
+            grp.create_dataset("cur_base", data=cur_base)
+            grp.create_dataset("next_ins", data=next_ins)
+    check_call(["gzip", tensor_fn])
     output_h5.close()
 
 
@@ -237,4 +290,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -46,9 +46,10 @@ def exclude_many_clipped_bases_read(CIGAR):
 def preprocess_read(row, ctg_name, minimum_mapping_quality, pileup):
     columns = row.strip().split()
     if (
-        columns[0][0] == "@"
-        or columns[2] != ctg_name
-        or int(columns[4]) < minimum_mapping_quality
+        columns[0][0] == "@"  # exlude head line
+        or columns[2] != ctg_name  # exclude reads aligned to other ctg
+        or int(columns[4])
+        < minimum_mapping_quality  # exlude reads with lower mapping quality
     ):
         return
 
@@ -124,15 +125,15 @@ def get_candidates(args):
             base_count = list(pileup[zero_based_position].items())
             depth = (
                 sum(x[1] for x in base_count)
-                - pileup[zero_based_position]["I"]
-                - pileup[zero_based_position]["D"]
+                # - pileup[zero_based_position]["I"]
+                # - pileup[zero_based_position]["D"]
             )
             if depth < args.min_coverage:
                 continue
             base_count.sort(key=lambda x: -x[1])
             if (
                 base_count[0][0] != ref_base
-                or (float(base_count[1][1]) / depth) >= args.min_allele_freq
+                and (float(base_count[1][1]) / depth) >= args.min_allele_freq
             ):
                 print(
                     f"{args.ctg_name} {zero_based_position + 1} {ref_base} {depth} "
@@ -191,4 +192,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

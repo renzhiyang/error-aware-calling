@@ -1,3 +1,5 @@
+#! /usr/bin/env python3
+
 import os
 import h5py
 import torch
@@ -75,7 +77,8 @@ def predict(args):
     for position in predictions.keys():
         caller = bayesian.BayesianCaller(predictions[position])
         next_base_dis, insertion_dis = caller[0]
-        print(next_base_dis, insertion_dis)
+        # print(caller.alleles)
+        # print(next_base_dis, insertion_dis)
 
 
 def main():
