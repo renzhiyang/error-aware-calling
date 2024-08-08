@@ -1,13 +1,10 @@
 import re
-import h5py
 import shlex
 import argparse
 import numpy as np
-from torch import copysign
 
-import src.utils as utils
 
-from subprocess import PIPE, Popen, check_call
+from subprocess import PIPE, Popen
 
 
 def candidate_information_from(candidate_line):
@@ -168,6 +165,9 @@ def get_query_base(query_seq, cigar, ref_start, candidate_pos):
                     cur_base = "-"
                 ref_index += 1
         length = 0
+
+    if cur_base == "N":  # for some case there are N showed in query reads
+        cur_base = "-"
     return cur_base, next_ins
 
 
@@ -199,6 +199,7 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     # get the previous reference bases before the current candidate position
     ref_seq = reconstruct_ref_seq(SEQ, MD, CIGAR, QUERY_POS, CAN_POS)
     cur_base, next_ins = get_query_base(SEQ, CIGAR, QUERY_POS, CAN_POS)
+
     if window_width > len(ref_seq):
         padding_seq = (window_width - len(ref_seq)) * "N"  # 'N' represent padding base
         ref_seq = padding_seq + ref_seq
@@ -206,11 +207,11 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
         ref_seq = ref_seq[len(ref_seq) - window_width :]
 
         # if next_ins != "N":
-        if cur_base == "-":
-            print(
-                f"start_pos: {QUERY_POS}, end_pos: {CAN_POS}, cur_base: {cur_base}, next_ins: {next_ins}"
-            )
-            print(f"ref_seq: {ref_seq}")
+    # if cur_base == "-":
+    #     print(
+    #         f"start_pos: {QUERY_POS}, end_pos: {CAN_POS}, cur_base: {cur_base}, next_ins: {next_ins}"
+    #     )
+    #     print(f"ref_seq: {ref_seq}")
     return ref_seq, cur_base, next_ins
 
 
@@ -224,7 +225,7 @@ def create_tensor(args):
     window_width = int(args.tensor_window_width)
 
     candidates = open(candidates_fn, "r")
-    output_h5 = h5py.File(tensor_fn, "w")
+    output_tensor_fn = open(tensor_fn, "w")
     for line in candidates:
         ctg_name, candidate_pos = candidate_information_from(line)
         subprocess = samtools_view_from(
@@ -239,18 +240,25 @@ def create_tensor(args):
             tensor_sequence, cur_base, next_ins = get_tensor_sequence_from(
                 read, candidate_pos, window_width
             )
-            tensor_one_hot = utils.one_hot_seq(tensor_sequence)
-            # Create a dataset for the position
-            grp = output_h5.create_group(f"pos_{candidate_pos}_{i}")
-            grp.create_dataset("position", data=candidate_pos)
-            grp.create_dataset(
-                "tensor_one_hot",
-                data=tensor_one_hot,
+            if cur_base == "":  # for some reads, there are all ""
+                continue
+
+            if len(next_ins) in range(3, 7):  # exclude insertion length large than 6
+                next_ins = "rep" + str(len(next_ins))
+            elif len(next_ins) > 6:
+                continue
+
+            output_line = (
+                f"pos_{candidate_pos}_{i}"
+                + "\t"
+                + tensor_sequence
+                + "\t"
+                + cur_base
+                + "\t"
+                + next_ins
+                + "\n"
             )
-            grp.create_dataset("cur_base", data=cur_base)
-            grp.create_dataset("next_ins", data=next_ins)
-    check_call(["gzip", tensor_fn])
-    output_h5.close()
+            output_tensor_fn.write(output_line)
 
 
 def main():

@@ -1,39 +1,4 @@
-import itertools
 import src.utils as utils
-
-
-class GenotypeCaller:
-    def __init__(self, reads, error_prob=0.003):
-        self.reads = reads
-        self.error_prob = error_prob
-        self.specific_error_prob = error_prob / 3
-        self.nucleotides = ["A", "C", "G", "T", "-"]
-        self.possible_genotypes = [
-            a + b
-            for a, b in itertools.combinations_with_replacement(self.nucleotides, 2)
-        ]
-        self.genotype_likelihoods = {}
-
-    def calculate_likelihood(self, genotype):
-        likelihood = 1.0
-        for read in self.reads:
-            base, _ = read
-            if base in genotype:
-                likelihood *= 1 - self.error_prob
-            else:
-                likelihood *= self.specific_error_prob
-        return likelihood
-
-    def calculate_all_likelihoods(self):
-        for genotype in self.possible_genotypes:
-            self.genotype_likelihoods[genotype] = self.calculate_likelihood(genotype)
-
-    def find_most_likely_genotype(self):
-        self.calculate_all_likelihoods()
-        most_likely_genotype = max(
-            self.genotype_likelihoods, key=self.genotype_likelihoods.get
-        )  # type: ignore
-        return most_likely_genotype, self.genotype_likelihoods[most_likely_genotype]
 
 
 class BayesianCaller:
@@ -41,47 +6,68 @@ class BayesianCaller:
     Caller for one candidate site
     """
 
-    def __init__(self, distributions):
-        self.distributions = distributions
-        self.cur_base_distribution = []  # from all reads
-        self.next_base_distribution = []
+    def __init__(self):
         self.alleles = utils.ALLELES()
+        self.base_prior_prob_dic = {}
+        self.insertion_prior_prob_dic = {}
 
-        for cur_b_dis, next_b_dis in distributions:
-            self.cur_base_distribution.append(cur_b_dis)
-            self.next_base_distribution.append(next_b_dis)
+        for base in utils.CLASSES_PROB_1:
+            self.base_prior_prob_dic[base] = 0
+        for ins in utils.CLASSES_PROB_2:
+            self.insertion_prior_prob_dic[ins] = 0
 
-    def likelihood_per_read(alleles, observed_base, cur_b_d, next_b_d):
+    def all_genotypes_posterior_porb_per_read(
+        self, cur_base_dis, insertion_dis, observed_base, observed_insertion
+    ):
         """
         给定当前read的训练好的distributions, 计算在genotype下, 观察到observed_base的概率
         输入：当前read的distributions,所有的alleles
-        输出：给出每一个allele的likelihood
+        输出：给出在cur_base_dis,insertion_dis的前提下，所有genotype的后验概率
         """
-        likelihoods = {}
+        # update base_prior_prob_dic and insertion_prior_prob_dic
+        for base, prob in zip(utils.CLASSES_PROB_1, cur_base_dis):
+            self.base_prior_prob_dic[base] = prob
+        for ins, prob in zip(utils.CLASSES_PROB_2, insertion_dis):
+            self.insertion_prior_prob_dic[ins] = prob
 
-        for allele, (allele_base, allele_insertion) in alleles.items():
-            
-        return None
+        # calculate posterior probability for each genotype
+        pos_probs = {}
+        for key, (allele1, allele2) in self.alleles.allele_dict.items():
+            # 1. calculate likelihood
+            # 2. posterior = likelihood * prior genotype
 
-    def posterior_prob_of_genotype(self, genotype):
-        likelihood = 1
-        for i in range(self.__len__()):
-            cur_b_dis = self.cur_base_distribution[i]
-            next_b_dis = self.next_base_distribution[i]
+            # calculate likelihood
+            likelihood = 0
+            if key.startswith("snv"):
+                likelihood = (
+                    self.base_prior_prob_dic[allele1]
+                    * self.base_prior_prob_dic[allele2]
+                )
+            elif key.startswith("insertion"):
+                likelihood = (
+                    self.base_prior_prob_dic[allele1]
+                    * self.insertion_prior_prob_dic[allele2]
+                )
 
-            if genotype[0] in cur_b_dis and genotype[1] in next_b_dis:
-                likelihood *= 1 - self.error_prob
-            else:
-                likelihood *= self.specific_error_prob
+            likelihood *= (
+                self.base_prior_prob_dic[observed_base]
+                * self.insertion_prior_prob_dic[observed_insertion]
+            )
+            pos_probs[key] = likelihood
 
-    def __len__(self):
-        return len(self.cur_base_distribution)
+        return pos_probs
 
-    def __getitem__(self, idx):
-        if idx < len(self.cur_base_distribution):
-            return self.cur_base_distribution[idx], self.next_base_distribution[idx]
-        else:
-            return None, None
+    def multiply_pos_probs_of_two_reads(self, pos_probs1, pos_probs2):
+        """
+        multiply two reads' posterior probs
+        """
+        pos_probs = {}
+        for key, value in pos_probs1.items():
+            pos_probs[key] = value * pos_probs2[key]
+        return pos_probs
+
+    def get_alleles(self):
+        return self.alleles
 
 
 # Usage

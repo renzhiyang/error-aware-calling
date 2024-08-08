@@ -77,6 +77,10 @@ IUPAC_base_to_ACGT_base_dict = dict(
 
 
 class ALLELES:
+    """
+    {'snv_A_A': ('A', 'A'),  'insertion_C_rep6': ('C', 'rep6'), ...}
+    """
+
     def __init__(self):
         self.allele_dict = {}
         for snv in SNVS:

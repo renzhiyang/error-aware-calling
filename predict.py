@@ -1,11 +1,12 @@
 #! /usr/bin/env python3
 
 import os
-import h5py
 import torch
 import argparse
 import numpy as np
+
 import src.bayesian as bayesian
+import src.utils as utils
 
 from src.errorprediction.models.baseline import Baseline
 from torch.utils.data import DataLoader
@@ -14,24 +15,43 @@ from torch.utils.data import DataLoader
 class TensorData:
     def __init__(self, file_path):
         self.file_path = file_path
-        self.data_keys = []
+        self.chunk_size = 1000
+        self.line_offset = []
+        self.total_lines = 0
 
-        with h5py.File(self.file_path, "r") as h5f:
-            self.data_keys = list(h5f.keys())
+        with open(file_path, "r") as f:
+            offset = 0
+            for line in f:
+                if self.total_lines % self.chunk_size == 0:
+                    self.line_offset.append(offset)
+                offset += len(line)
+                self.total_lines += 1
 
     def __len__(self):
-        return len(self.data_keys)
+        return self.total_lines
 
     def __getitem__(self, idx):
-        with h5py.File(self.file_path, "r") as h5f:
-            key = self.data_keys[idx]
-            grp = h5f[key]
-            # position = np.array(grp['position'])[()].item() # type: ignore
-            position = np.array(grp["position"]).item()  # type: ignore
-            read_one_hot_tensor = torch.tensor(
-                grp["tensor_one_hot"][()], dtype=torch.float32
-            )  # type: ignore
-        return position, read_one_hot_tensor
+        chunk_idx = idx // self.chunk_size
+        line_idx = idx % self.chunk_size
+
+        with open(self.file_path, "r") as f:
+            f.seek(self.line_offset[chunk_idx])
+            for _ in range(line_idx):
+                f.readline()
+            line = f.readline().strip().split("\t")
+
+            id = line[0]
+            input_seq = line[1]
+            observe_b = str(line[2])
+            observe_ins = str(line[3])
+
+            # print(f"ob:{observe_b}, oi:{observe_ins}")
+
+            position = int(id.split("_")[1])
+            index = int(id.split("_")[2])
+
+            tensor_one_hot = utils.one_hot_seq(input_seq)
+            return position, tensor_one_hot, observe_b, observe_ins
 
 
 def predict(args):
@@ -57,28 +77,37 @@ def predict(args):
 
     dataset = TensorData(tensor_fn)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)  # type: ignore
-
-    predictions = {}
+    caller = bayesian.BayesianCaller()
+    pos_probs_in_pos = {}  # key:position, value: all reads' posterior probs dict
     count = 0
-    for position, tensor_one_hot in dataloader:
-        count += 1
-        if count >= 1000:
-            break
+    for position, tensor_one_hot, observe_b, observe_ins in dataloader:
+        # count += 1
+        # if count >= 1000:
+        #    break
         tensor_one_hot = tensor_one_hot.float().to(device)
+        observe_b = observe_b[0]
+        observe_ins = observe_ins[0]
         next_base_dis, insertion_dis = model(tensor_one_hot)
+
+        # print(f"position:{position}, tensor:{tensor_one_hot}")
+        # print(f"position:{position}, observe_b:{observe_b}, observe_ins:{observe_ins}")
 
         position = position.numpy().item()
         next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
         insertion_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
-        if position not in predictions:
-            predictions[position] = []
-        predictions[position].append([next_base_dis, insertion_dis])
+        if position not in pos_probs_in_pos:
+            pos_probs_in_pos[position] = []
 
-    for position in predictions.keys():
-        caller = bayesian.BayesianCaller(predictions[position])
-        next_base_dis, insertion_dis = caller[0]
-        # print(caller.alleles)
-        # print(next_base_dis, insertion_dis)
+        all_genotype_pos_probs_one_read = caller.all_genotypes_posterior_porb_per_read(
+            next_base_dis, insertion_dis, observe_b, observe_ins
+        )
+
+        if len(pos_probs_in_pos[position]) == 0:
+            pos_probs_in_pos[position] = all_genotype_pos_probs_one_read
+        else:
+            pos_probs_in_pos[position] = caller.multiply_pos_probs_of_two_reads(
+                pos_probs_in_pos[position], all_genotype_pos_probs_one_read
+            )
 
 
 def main():
