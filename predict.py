@@ -54,6 +54,13 @@ class TensorData:
             return position, tensor_one_hot, observe_b, observe_ins
 
 
+def normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    min_val = tensor.min()
+    max_val = tensor.max()
+    normalized_tensor = (tensor - min_val) / (max_val - min_val)
+    return normalized_tensor
+
+
 def predict(args):
     model_fn = args.model
     tensor_fn = args.tensor_fn
@@ -95,6 +102,10 @@ def predict(args):
         position = position.numpy().item()
         next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
         insertion_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
+
+        next_base_dis = normalize_tensor(next_base_dis)
+        insertion_dis = normalize_tensor(insertion_dis)
+
         if position not in pos_probs_in_pos:
             pos_probs_in_pos[position] = []
 
@@ -108,6 +119,11 @@ def predict(args):
             pos_probs_in_pos[position] = caller.multiply_pos_probs_of_two_reads(
                 pos_probs_in_pos[position], all_genotype_pos_probs_one_read
             )
+
+    for pos, pos_probs in pos_probs_in_pos.items():
+        print(f"position: {pos}")
+        for key, value in pos_probs.items():
+            print(f"genotype: {key}, likelihood: {value}")
 
 
 def main():
