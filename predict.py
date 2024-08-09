@@ -96,6 +96,8 @@ def predict(args):
         observe_ins = observe_ins[0]
         next_base_dis, insertion_dis = model(tensor_one_hot)
 
+        # print(f"min max base: {next_base_dis.min()}, {next_base_dis.max()}")
+        # print(f"min max ins: {insertion_dis.min()}, {insertion_dis.max()}")
         # print(f"position:{position}, tensor:{tensor_one_hot}")
         # print(f"position:{position}, observe_b:{observe_b}, observe_ins:{observe_ins}")
 
@@ -121,9 +123,8 @@ def predict(args):
             )
 
     for pos, pos_probs in pos_probs_in_pos.items():
-        print(f"position: {pos}")
-        for key, value in pos_probs.items():
-            print(f"genotype: {key}, likelihood: {value}")
+        sorted_probs = sorted(pos_probs.items(), key=lambda x: x[1], reverse=True)
+        print(f"position: {pos}, most likelily genotype: {next(iter(sorted_probs))}")
 
 
 def main():
