@@ -1,8 +1,6 @@
 import re
 import shlex
 import argparse
-import numpy as np
-
 
 from subprocess import PIPE, Popen
 
@@ -217,7 +215,7 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
 
 def create_tensor(args):
     samtools = args.samtools
-    ref_fn = args.ref_fn
+    # ref_fn = args.ref_fn
     bam_fn = args.bam_fn
     candidates_fn = args.candidates_fn
     tensor_fn = args.tensor_fn

@@ -78,23 +78,28 @@ IUPAC_base_to_ACGT_base_dict = dict(
 
 class ALLELES:
     """
-    {'snv_A_A': ('A', 'A'),  'insertion_C_rep6': ('C', 'rep6'), ...}
+    example:
+    snv  {'snv_A_C': ('A', 'C')}, the firtst allele is A, the second allele is C, is a heterozygous snv
+    insertion:  'insertion_C_rep6': ('C', 'CC'), ...},
+                the first allele is insert C, the second allele is insert CC, is a heterozygous insertion
+
+    for insertion, "insertion_N_N" means no insertion, "insertion_A_A" means all insertions are A here.
+                   "insertion_N_A" means haf of insertions are A, the other no insertion means haf of insertions are A, the other no insertion.
     """
 
     def __init__(self):
         self.allele_dict = {}
+        class2_remain_list = CLASSES_PROB_2.copy()
+
         for snv in SNVS:
             key = f"snv_{snv[0]}_{snv[1]}"
             self.allele_dict[key] = (snv[0], snv[1])
-        for first in CLASSES_PROB_1:
-            if first == "-":
-                continue
-            for second in CLASSES_PROB_2:
-                if second == "N":
-                    continue
+
+        for first in CLASSES_PROB_2:
+            for second in class2_remain_list:
                 key = f"insertion_{first}_{second}"
                 self.allele_dict[key] = (first, second)
-        print(self.allele_dict)
+            class2_remain_list.remove(first)
 
 
 def process_base(base):

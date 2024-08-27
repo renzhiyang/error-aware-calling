@@ -106,20 +106,24 @@ def get_candidates(args):
 
     counts = 0
     with Popen(
-        shlex.split(
-            f"{samtools} view {args.bam_fn} {args.ctg_name} {' '.join(regions)}"
-        ),
+        # shlex.split(
+        # f"{samtools} view {args.bam_fn} {args.ctg_name} {' '.join(regions)}"
+        # ),
+        shlex.split(f"{samtools} view {args.bam_fn} {''.join(regions)}"),
         stdout=PIPE,
     ) as p:
         for row in p.stdout:  # type: ignore
             # counts += 1
             # if counts % 10000 == 0:
-            #    print(counts, flush=True)
+            # print(counts, flush=True)
             preprocess_read(row.decode(), args.ctg_name, args.min_mq, pileup)
 
     positions = sorted(pileup.keys())
     for zero_based_position in positions:
         if args.ctg_start <= zero_based_position + 1 <= args.ctg_end:
+            # print test
+            # print(f"position: {zero_based_position + 1}, pileup: {pileup[zero_based_position]}")
+
             reference_position = zero_based_position - args.ctg_start + 1
             ref_base = reference_sequence[reference_position]
             base_count = list(pileup[zero_based_position].items())
@@ -157,20 +161,26 @@ def main():
     parser.add_argument(
         "--min_coverage",
         type=int,
-        help="minimum coverage for find candidates",
+        help="minimum coverage for find candidates, default is 10",
         default=10,
     )
     parser.add_argument(
         "--min_allele_freq",
         type=float,
-        help="Minimum allele frequency for find candidates",
+        help="Minimum allele frequency for find candidates, default is 0.125",
         default=0.125,
     )
     parser.add_argument(
-        "--min_mq", type=int, help="minimum mapping quality required", default=10
+        "--min_mq",
+        type=int,
+        help="minimum mapping quality required, default is 10",
+        default=10,
     )
     parser.add_argument(
-        "--min_bq", type=int, help="minimum base quality required", default=10
+        "--min_bq",
+        type=int,
+        help="minimum base quality required, default is 10",
+        default=10,
     )
     parser.add_argument("--vcf_fn", type=str, help="candidate sites vcf file")
     parser.add_argument(

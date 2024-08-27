@@ -3,12 +3,12 @@
 import os
 import torch
 import argparse
-import numpy as np
 
 import src.bayesian as bayesian
 import src.utils as utils
+import numpy as np
 
-from src.errorprediction.models.baseline import Baseline
+from errorprediction.models.baseline import Baseline
 from torch.utils.data import DataLoader
 
 
@@ -86,16 +86,21 @@ def predict(args):
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)  # type: ignore
     caller = bayesian.BayesianCaller()
     pos_probs_in_pos = {}  # key:position, value: all reads' posterior probs dict
-    count = 0
+    # count = 0
     for position, tensor_one_hot, observe_b, observe_ins in dataloader:
+        # test codes
         # count += 1
         # if count >= 1000:
-        #    break
+        # break
+        # if position != 7232171:
+        #    continue
+
         tensor_one_hot = tensor_one_hot.float().to(device)
         observe_b = observe_b[0]
         observe_ins = observe_ins[0]
         next_base_dis, insertion_dis = model(tensor_one_hot)
 
+        # test codes
         # print(f"min max base: {next_base_dis.min()}, {next_base_dis.max()}")
         # print(f"min max ins: {insertion_dis.min()}, {insertion_dis.max()}")
         # print(f"position:{position}, tensor:{tensor_one_hot}")
@@ -107,6 +112,9 @@ def predict(args):
 
         next_base_dis = normalize_tensor(next_base_dis)
         insertion_dis = normalize_tensor(insertion_dis)
+
+        # test codes
+        # print(f"observed base:{observe_b}, next base dis:{next_base_dis}")
 
         if position not in pos_probs_in_pos:
             pos_probs_in_pos[position] = []
@@ -138,9 +146,7 @@ def main():
         required=True,
     )
     parser.add_argument(
-        "--tensor_fn",
-        type=str,
-        help="tensor file generate by generate_tensor.py, h5py file format",
+        "--tensor_fn", type=str, help="tensor file generate by generate_tensor.py"
     )
     args = parser.parse_args()
     predict(args)

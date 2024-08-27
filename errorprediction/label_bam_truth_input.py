@@ -903,7 +903,7 @@ def generate_label(config):
             )
 
 
-@hydra.main(version_base=None, config_path="../../configs", config_name="defaults.yaml")
+@hydra.main(version_base=None, config_path="../configs", config_name="defaults.yaml")
 def main(config: DictConfig) -> None:
     config = config.label_data
     # print(config.label.window_size_half, config.data_path.label_f, flush=True)
@@ -913,4 +913,3 @@ def main(config: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -266,8 +266,8 @@ def test_only_first(model, test_loader, criterion):
 
 @hydra.main(
     version_base=None,
-    config_path="../../configs/error_prediction",
-    config_name="params.yaml",
+    config_path="../configs",
+    config_name="defauls.yaml",
 )
 def main(config: DictConfig) -> None:
     dataset = Data_Loader(
@@ -341,4 +341,3 @@ if __name__ == "__main__":
     writer = SummaryWriter(f"runs/experiment-{start_time}")
     print(device, flush=True)
     main()
-
