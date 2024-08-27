@@ -83,8 +83,10 @@ def preprocess_read(row, ctg_name, minimum_mapping_quality, pileup):
             query_position += length
 
         elif b == "D":
-            pileup[reference_position - 1]["D"] += 1
-            reference_position += length
+            for _ in range(length):
+                # print(f"position: {reference_position}is deletion")
+                pileup[reference_position]["D"] += 1
+                reference_position += 1
 
         length = 0
 
@@ -122,7 +124,6 @@ def get_candidates(args):
     for zero_based_position in positions:
         if args.ctg_start <= zero_based_position + 1 <= args.ctg_end:
             # print test
-            # print(f"position: {zero_based_position + 1}, pileup: {pileup[zero_based_position]}")
 
             reference_position = zero_based_position - args.ctg_start + 1
             ref_base = reference_sequence[reference_position]
@@ -135,15 +136,21 @@ def get_candidates(args):
             if depth < args.min_coverage:
                 continue
             base_count.sort(key=lambda x: -x[1])
-            if (
-                base_count[0][0] != ref_base
+            # print(f"position: {zero_based_position + 1}, base_count:{base_count}")
+
+            # print candidate positions
+            is_first_allele_fits = base_count[0][0] != ref_base
+            is_second_allele_fits = (
+                base_count[0][0] == ref_base
                 and (float(base_count[1][1]) / depth) >= args.min_allele_freq
-            ):
+            )
+            if is_first_allele_fits or is_second_allele_fits:
                 print(
                     f"{args.ctg_name} {zero_based_position + 1} {ref_base} {depth} "
                     + " ".join([f"{x[0]} {x[1]}" for x in base_count]),
                     flush=True,
                 )
+
         del pileup[zero_based_position]
 
 
