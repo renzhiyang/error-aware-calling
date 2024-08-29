@@ -194,9 +194,15 @@ def print_label(
     position should be change to 1-base
     """
     # print(f'---start print---')
-    # don't output the first forward bases (illumina: 100, ONT: 256)
+    # append "N" at the start of the sequence if the length of the sequence is less than the window size as target:
     if len(sequence_around) < config.label.window_size_half:
-        return
+        sequence_around = (
+            "N" * (config.label.window_size_half - len(sequence_around))
+            + sequence_around
+        )
+
+    if len(sequence_around) != config.label.window_size_half:
+        print(f"sequence_around:{sequence_around}")
 
     # reverse read base
     # if read_strand == "reverse":
@@ -851,10 +857,20 @@ def label_phased_read(
         progress = (current_pos / read.query_length) * 100
         crossed_threshold = {t for t in tracking_threshold if progress >= t}
         for t in crossed_threshold:
-            # print(f"Crossed {t}% threshold at position: {current_pos}, Progress: {progress:.2f}%, labels: {label_count}", flush=True)
+            # print(
+            #    f"Crossed {t}% threshold at position: {current_pos}, Progress: {progress:.2f}%, labels: {label_count}",
+            #    flush=True,
+            # )
             tracking_threshold.remove(t)
 
     return
+
+
+def check_generate_label_file_from_path(label_path: str):
+    dir = os.path.dirname(label_path)
+
+    if not os.path.exists(dir):
+        os.makedirs(dir)
 
 
 def label_data(
@@ -866,6 +882,7 @@ def label_data(
     config: DictConfig,
 ):
     haplotype = get_phased_read_haplotype(read)
+    check_generate_label_file_from_path(config.data_path.label_f)
     # print(type(config.controller.unphased),config.controller.unphased)
     if haplotype == None and config.controller.unphased == True:
         label_unphased_read(chrom, read, ref_seq, variants, confident_regions, config)
