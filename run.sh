@@ -95,7 +95,7 @@ mkdir -p "$OUTPUT_PREFIX"
 required_software=("samtools" "parallel" "python")
 
 for software in "${required_software[@]}"; do
-  if ! command -v $software &>/dev/null; then
+  if ! command -v "$software" &>/dev/null; then
     echo "Error: $software is not installed."
     exit 1
   fi
@@ -122,47 +122,60 @@ if [ ! -f "$REF_FILE" ]; then
   exit 1
 fi
 
-############### FIRST STEP: Find candidates
+# create intermediate directory
+CANDIDATES_PREFIX="$OUTPUT_PREFIX/candidates"
+TENSOR_PREFIX="$OUTPUT_PREFIX/tensor"
+mkdir -p "$CANDIDATES_PREFIX"
+mkdir -p "$TENSOR_PREFIX"
+
+############### FIRST STEP: Find candidates and generaet tensor file
 find_candidates() {
   local ctg_name=$1
   local ctg_start=$2
   local ctg_end=$3
+  #echo "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   python ./src/find_candidates.py \
-    --bam_fn $BAM_FILE \
-    --ref_fn $REF_FILE \
-    --ctg_name $ctg_name \
-    --ctg_start $ctg_start \
-    --ctg_end $ctg_end \
+    --bam_fn "$BAM_FILE" \
+    --ref_fn "$REF_FILE" \
+    --ctg_name "$ctg_name" \
+    --ctg_start "$ctg_start" \
+    --ctg_end "$ctg_end" \
     --min_mq 20 \
     --min_coverage 10 \
     --min_allele_freq 0.125 \
-    >"$OUTPUT_PREFIX/$ctg_name.$ctg_start-$ctg_end.txt"
+    >"$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   # Remove file if it's empty
-  if [ ! -s "$OUTPUT_PREFIX/$ctg_name.$ctg_start-$ctg_end.txt" ]; then
-    rm "$OUTPUT_PREFIX/$ctg_name.$ctg_start-$ctg_end.txt"
+  if [ ! -s "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates" ]; then
+    rm "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
+  else
+    python -m src.generate_tensor \
+      --ref_fn "$REF_FILE" \
+      --bam_fn "$BAM_FILE" \
+      --candidates_fn "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates" \
+      --tensor_fn "$TENSOR_PREFIX/$ctg_name.$ctg_start-$ctg_end.tensor"
   fi
 }
 
 export -f find_candidates
 export PARALLEL="--jobs $SLOTS"
-export BAM_FILE REF_FILE OUTPUT_PREFIX
+export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX
 
 # Function to combine candidate files for each chromosome
 combine_candidates() {
   local ctg_name=$1
-  cat $OUTPUT_PREFIX/$ctg_name.*.txt >$OUTPUT_PREFIX/$ctg_name.combined.txt
+  cat "$OUTPUT_PREFIX/$ctg_name.*.candidates" >"$OUTPUT_PREFIX/$ctg_name.combined.candidates"
   # Remove intermediate files
-  rm $OUTPUT_PREFIX/$ctg_name.*.txt
+  rm "$OUTPUT_PREFIX/$ctg_name.*.candidates"
 }
 export -f combine_candidates
 
 # Generate chunks, only process regions from BED file if file is provided, otherwise for all ctgs
 chunk_file="$OUTPUT_PREFIX/chunks.txt"
->"$chunk_file"
+touch "$chunk_file"
 
 if [ -n "$BED_FILE" ]; then
   # Process regions from BED file
-  awk -v chunk_size=$CHUNK_SIZE '{
+  awk -v chunk_size="$CHUNK_SIZE" '{
         for (start = $2 + 1; start <= $3; start += chunk_size) {
             end = start + chunk_size - 1
             if (end > $3) end = $3
@@ -171,16 +184,16 @@ if [ -n "$BED_FILE" ]; then
     }' "$BED_FILE" >"$chunk_file"
 else
   # Get chromosome names and lengths using samtools
-  samtools idxstats $BAM_FILE | awk '{print $1, $2}' | while read -r chr length; do
+  samtools idxstats "$BAM_FILE" | awk '{print $1, $2}' | while read -r chr length; do
     for ((start = 1; start <= $length; start += CHUNK_SIZE)); do
       end=$((start + CHUNK_SIZE - 1))
-      if [ $end -ge $length ]; then end=$length; fi
+      if [ $end -ge "$length" ]; then end=$length; fi
       echo "$chr $start $end"
     done
   done >"$chunk_file"
 fi
 
 # Process chunks using GNU parallel with limited threads
-cat "$chunk_file" | parallel --colsep ' ' -j $SLOTS find_candidates
-cat "$OUTPUT_PREFIX"/*.txt >"$OUTPUT_PREFIX/all_candidates"
-rm "$OUTPUT_PREFIX"/*.txt
+cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates
+#cat "$CANDIDATES_PREFIX"/*.candidates >"$CANDIDATES_PREFIX/all_candidates"
+#rm "$CANDIDATES_PREFIX"/*.txt

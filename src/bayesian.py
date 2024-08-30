@@ -18,48 +18,7 @@ class BayesianCaller:
         for ins in utils.CLASSES_PROB_2:
             self.insertion_prior_prob_dic[ins] = 0
 
-    def all_genotypes_posterior_porb_per_read(
-        self, cur_base_dis, insertion_dis, observed_base, observed_insertion
-    ):
-        """
-        给定当前read的训练好的distributions, 计算在genotype下, 观察到observed_base的概率
-        输入：当前read的distributions,所有的alleles
-        输出：给出在cur_base_dis,insertion_dis的前提下，所有genotype的后验概率
-        """
-        # update base_prior_prob_dic and insertion_prior_prob_dic
-        for base, prob in zip(utils.CLASSES_PROB_1, cur_base_dis):
-            self.base_prior_prob_dic[base] = prob
-        for ins, prob in zip(utils.CLASSES_PROB_2, insertion_dis):
-            self.insertion_prior_prob_dic[ins] = prob
-
-        # calculate posterior probability for each genotype
-        pos_probs = {}
-        for key, (allele1, allele2) in self.alleles.allele_dict.items():
-            # 1. calculate likelihood
-            # 2. posterior = likelihood * prior genotype
-
-            # calculate likelihood
-            likelihood = 0
-            if key.startswith("snv"):
-                likelihood = (
-                    self.base_prior_prob_dic[allele1]
-                    * self.base_prior_prob_dic[allele2]
-                )
-            elif key.startswith("insertion"):
-                likelihood = (
-                    self.base_prior_prob_dic[allele1]
-                    * self.insertion_prior_prob_dic[allele2]
-                )
-
-            likelihood *= (
-                self.base_prior_prob_dic[observed_base]
-                * self.insertion_prior_prob_dic[observed_insertion]
-            )
-            pos_probs[key] = likelihood
-
-        return pos_probs
-
-    def all_genotypes_posterior_prob_per_read_2(
+    def all_genotypes_posterior_prob_per_read(
         self, cur_base_dis, insertion_dis, observed_base, observed_insertion
     ):
         """
@@ -111,13 +70,14 @@ class BayesianCaller:
 
         return pos_probs
 
-    def all_genotypes_posterior_prob_per_read_2_log(
+    def all_genotypes_posterior_prob_per_read_log(
         self, cur_base_dis, insertion_dis, observed_base, observed_insertion
     ):
-        # update base_prior_prob_dic and insertion_prior_prob_dic
-        log_sum_base_dis, log_sum_ins_dis = self.process_and_sum_dis(
-            cur_base_dis, insertion_dis
-        )
+        # initialize base_prior_prob_dic and insertion_prior_prob_dic
+        self.initialize_prior_prob_dic(cur_base_dis, insertion_dis)
+        # print(
+        # f"len base_prior_prob_dic: {len(self.base_prior_prob_dic)}, len insertion_prior_prob_dic: {len(self.insertion_prior_prob_dic)}"
+        # )
 
         # calculate posterior probability for each genotype
         pos_probs = {}
@@ -157,9 +117,6 @@ class BayesianCaller:
                 #    math.exp(self.base_prior_prob_dic[allele2]),
                 # )
 
-                # print(f"pre likelihood: {likelihood}")
-                # print(f"after likelihood: {likelihood}")
-
             elif key.startswith("insertion"):
                 prior_genotypes = (
                     self.insertion_prior_prob_dic[allele1]
@@ -178,6 +135,77 @@ class BayesianCaller:
             # print(f"likelihood: {likelihood}")
 
             pos_probs[key] = likelihood
+
+        # marginal_likelihood = sum([1 / abs(value) for value in pos_probs.values()])
+        # key, value in pos_probs.items():
+        # pos_probs[key] = (1 / abs(value)) / marginal_likelihood
+        # for key, value in pos_probs.items():
+        # pos_probs[key] = value / marginal_likelihood
+
+        return pos_probs
+
+    def all_genotypes_posterior_prob_per_read_log_uniform_prior(
+        self, cur_base_dis, insertion_dis, observed_base, observed_insertion
+    ):
+        # initialize base_prior_prob_dic and insertion_prior_prob_dic
+        self.initialize_prior_prob_dic(cur_base_dis, insertion_dis)
+
+        # calculate posterior probability for each genotype
+        pos_probs = {}
+        # print(self.base_prior_prob_dic, self.insertion_prior_prob_dic)
+
+        for key, (allele1, allele2) in self.alleles.allele_dict.items():
+            likelihood = self.mini_prob
+            prior_genotypes = self.mini_prob
+
+            log_observed_base = self.base_prior_prob_dic[observed_base]
+            log_observed_ins = self.insertion_prior_prob_dic[observed_insertion]
+            if key.startswith("snv"):
+                prior_genotypes = 1 / 20
+                if observed_base in (allele1, allele2):
+                    likelihood = math.exp(log_observed_base) / (
+                        math.exp(self.base_prior_prob_dic[allele1])
+                        + math.exp(self.base_prior_prob_dic[allele2])
+                    )
+                else:
+                    likelihood = self.mini_prob
+                    # total_error = math.exp(log_sum_base_dis) - math.exp(
+                    #    self.base_prior_prob_dic[allele1]
+                    # )
+                    # if allele1 != allele2:
+                    #    total_error -= math.exp(self.base_prior_prob_dic[allele2])
+
+                    # likelihood = math.exp(log_observed_base) / total_error
+                likelihood = math.log(likelihood)
+                # print(
+                #    likelihood,
+                #    math.exp(log_observed_base),
+                #    math.exp(log_sum_base_dis),
+                #    math.exp(self.base_prior_prob_dic[allele1]),
+                #    math.exp(self.base_prior_prob_dic[allele2]),
+                # )
+
+            elif key.startswith("insertion"):
+                prior_genotypes = 1 / 50
+                if observed_insertion in (allele1, allele2):
+                    likelihood = math.exp(log_observed_ins) / (
+                        math.exp(self.insertion_prior_prob_dic[allele1])
+                        + math.exp(self.insertion_prior_prob_dic[allele2])
+                    )
+                else:
+                    likelihood = self.mini_prob
+                likelihood = math.log(likelihood)
+
+            likelihood = likelihood + prior_genotypes
+            # print(f"likelihood: {likelihood}")
+
+            pos_probs[key] = likelihood
+
+        # marginal_likelihood = sum([1 / abs(value) for value in pos_probs.values()])
+        # key, value in pos_probs.items():
+        # pos_probs[key] = (1 / abs(value)) / marginal_likelihood
+        # for key, value in pos_probs.items():
+        # pos_probs[key] = value / marginal_likelihood
 
         return pos_probs
 
@@ -209,7 +237,22 @@ class BayesianCaller:
             pos_probs[key] = value + pos_probs2[key]
         return pos_probs
 
-    def process_and_sum_dis(self, cur_base_dis, insertion_dis):
+    def normalize_pos_probs_from_minus_input(self, pos_probs: dict):
+        """
+        normalize pos_probs from minus input
+        """
+        marginal_likelihood = sum(1 / abs(value) for value in pos_probs.values())
+        for key, value in pos_probs.items():
+            pos_probs[key] = (1 / abs(value)) / marginal_likelihood
+        return pos_probs
+
+    def initialize_prior_prob_dic(self, cur_base_dis, insertion_dis):
+        """
+        This method is used to initialize self.base_prior_prob_dic and self.insertion_prior_prob_dic
+        Input:
+            cur_base_dis: a 1x5 list, restore the probabilities of A,C,G,T,- predicted by DL model
+            insertion_dis: a 1x25 list, restore the probabilities of insertions predicted by DL model
+        """
         sum_base_dis = 0
         sum_insertion_dis = 0
         for base, prob in zip(utils.CLASSES_PROB_1, cur_base_dis):
@@ -228,10 +271,9 @@ class BayesianCaller:
                 sum_insertion_dis += prob
                 self.insertion_prior_prob_dic[ins] = math.log(prob)
 
-        log_sum_base_dis = math.log(sum_base_dis)
-        log_sum_ins_dis = math.log(sum_insertion_dis)
-
-        return log_sum_base_dis, log_sum_ins_dis
+        # log_sum_base_dis = math.log(sum_base_dis)
+        # log_sum_ins_dis = math.log(sum_insertion_dis)
+        # return log_sum_base_dis, log_sum_ins_dis
 
     def get_alleles(self):
         return self.alleles

@@ -94,12 +94,14 @@ class ALLELES:
         for snv in SNVS:
             key = f"snv_{snv[0]}_{snv[1]}"
             self.allele_dict[key] = (snv[0], snv[1])
+        # print(f"number of snvs: {len(self.allele_dict)}, {self.allele_dict}")
 
         for first in CLASSES_PROB_2:
             for second in class2_remain_list:
                 key = f"insertion_{first}_{second}"
                 self.allele_dict[key] = (first, second)
             class2_remain_list.remove(first)
+        # print(f"total number of genotypes: {len(self.allele_dict)}, {self.allele_dict}")
 
 
 def process_base(base):
