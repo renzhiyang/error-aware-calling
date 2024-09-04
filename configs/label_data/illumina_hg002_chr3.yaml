@@ -1,0 +1,19 @@
+data_path: 
+  ok: 111
+  confident_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/truthset/subset/HG002_GRCh38_3_v4.2.1_benchmark_noinconsistent.bed
+  ref_f: /home/yang1031/genomeData/ONT_open_datasets/giab_2023.05/analysis/benchmarking/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna
+  label_f: /home/yang1031/projects/error-aware-calling/data/illumina/label_chr3_100window_unphased_truth_input
+  tagged_bam: /home/yang1031/genomeData/Illumina/hg002/precisionFDA/subset/HG002.novaseq.pcr-free-grch38-tagged-chr3.35x.bam
+  phased_vcf: /home/yang1031/genomeData/Illumina/hg002/precisionFDA/vcf/HG002_chr3_phased.vcf.gz
+
+alignment_filter:
+  min_mapping_quality: 40
+  min_base_quality: 10
+
+label:
+  window_size_half: 100
+
+controller:
+  phased: False
+  unphased: True
+  seq_around: False

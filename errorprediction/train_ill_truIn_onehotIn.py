@@ -267,9 +267,11 @@ def test_only_first(model, test_loader, criterion):
 @hydra.main(
     version_base=None,
     config_path="../configs",
-    config_name="defauls.yaml",
+    config_name="defaults.yaml",
 )
 def main(config: DictConfig) -> None:
+    config = config.error_prediction
+    print(OmegaConf.to_yaml(config), flush=True)
     dataset = Data_Loader(
         file_path=config.data_path.label_f,
         config=config,
@@ -280,7 +282,7 @@ def main(config: DictConfig) -> None:
         batch_size=config.training.batch_size,
         train_ratio=config.training.train_ratio,
     )
-    print(OmegaConf.to_yaml(config), flush=True)
+
 
     model = Baseline().to(device)
 

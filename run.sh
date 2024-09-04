@@ -128,8 +128,8 @@ TENSOR_PREFIX="$OUTPUT_PREFIX/tensor"
 mkdir -p "$CANDIDATES_PREFIX"
 mkdir -p "$TENSOR_PREFIX"
 
-############### FIRST STEP: Find candidates and generaet tensor file
-find_candidates() {
+############### FIRST STEP: Find candidates and generate tensor file
+find_candidates_generate_tensors() {
   local ctg_name=$1
   local ctg_start=$2
   local ctg_end=$3
@@ -156,7 +156,7 @@ find_candidates() {
   fi
 }
 
-export -f find_candidates
+export -f find_candidates_generate_tensors
 export PARALLEL="--jobs $SLOTS"
 export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX
 
@@ -194,6 +194,9 @@ else
 fi
 
 # Process chunks using GNU parallel with limited threads
-cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates
-#cat "$CANDIDATES_PREFIX"/*.candidates >"$CANDIDATES_PREFIX/all_candidates"
-#rm "$CANDIDATES_PREFIX"/*.txt
+cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates_generate_tensors
+
+# delete candidate files
+# rm "$CANDIDATES_PREFIX"/*.candidates
+
+############### Step2: Predicting ###############

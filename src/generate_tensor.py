@@ -247,7 +247,9 @@ def create_tensor(args):
                 continue
 
             output_line = (
-                f"pos_{candidate_pos}_{i}"
+                f"{ctg_name}"
+                + "\t"
+                + "pos_{candidate_pos}_{i}"
                 + "\t"
                 + tensor_sequence
                 + "\t"

@@ -1,2 +1,3 @@
 defaults:
-  - label_data: chr1
+  - label_data: illumina_hg002_chr1
+  - error_prediction: params

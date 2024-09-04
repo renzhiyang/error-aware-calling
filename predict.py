@@ -119,8 +119,10 @@ def predict(args):
         if position not in pos_probs_in_pos:
             pos_probs_in_pos[position] = []
 
-        all_genotype_pos_probs_one_read = caller.all_genotypes_posterior_porb_per_read(
-            next_base_dis, insertion_dis, observe_b, observe_ins
+        all_genotype_pos_probs_one_read = (
+            caller.all_genotypes_posterior_prob_per_read_log(
+                next_base_dis, insertion_dis, observe_b, observe_ins
+            )
         )
 
         if len(pos_probs_in_pos[position]) == 0:
