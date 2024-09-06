@@ -22,3 +22,4 @@ training:
   epochs: 100
   label_length: 20
   up_seq_len: 99
+  kmer: 3
