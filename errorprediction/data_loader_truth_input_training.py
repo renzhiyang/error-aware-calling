@@ -4,9 +4,10 @@
 import os
 import numpy as np
 
-from utils import *
+from errorprediction.utils import *
 
 VOCAB = {"A": 1, "C": 2, "G": 3, "T": 4, "-": 5, "N": 6}
+VOCAB_KMER = {"N": 0, "A": 1, "C": 2, "G": 3, "T": 4, "-": 5}
 CLASSES_PROB_1 = ["A", "C", "G", "T", "-"]
 CLASSES_PROB_2 = [
     "N",
@@ -116,6 +117,39 @@ class Data_Loader:
         # print(f'one-hot array shape: {one_hot_array.shape}')
         return one_hot_array
 
+    def input_tokenization_kmer(self, input_seq: str, k=3):
+        """
+        Encode input sequence with k-mer
+        """
+        len_seq = len(input_seq)
+        len_vocab = len(VOCAB_KMER)
+
+        # Initialize an empty list to store k-mer encoding
+        kmer_encodings = []
+
+        # Check if the sequence length is at least the k-mer length
+        if len_seq < k:
+            return None
+
+        # Iterate through the sequence to extract k-mers
+        for i in range(len_seq - k + 1):
+            kmer = input_seq[i : i + k]
+
+            # Convert k-mer into numerical encoding based on VOCAB
+            kmer_value = 0
+            for j, char in enumerate(kmer):
+                if char not in VOCAB_KMER:
+                    return None  # Handle unkwon characters
+                # Calculate the unique value for the k-mer
+                kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))
+
+            # Append the encoded k-mer value to the list
+            kmer_encodings.append(kmer_value)
+
+        # Convert the list to a numpy array for efficient processing
+        kmer_encodings = np.array(kmer_encodings, dtype=np.float32)
+        return kmer_encodings
+
     def label_tokenization(self, label_1: str, label_2: str):
         """
         Map Input nucleotide label to array
@@ -155,7 +189,8 @@ class Data_Loader:
         # print(data_dict['pos'], label_1, label_2)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
         # input_array = self.input_tokenization(up_seq) # without one hot encoding
-        input_array = self.input_tokenization_onehot(up_seq)  # with one hot encoding
+        # input_array = self.input_tokenization_onehot(up_seq)  # with one hot encoding
+        input_array = self.input_tokenization_kmer(up_seq, k=3)
         # return input_array, label_array_1, label_array_2
         return [(input_array, label_array_1, label_array_2)]
 
@@ -174,7 +209,8 @@ class Data_Loader:
             label_2 = "rep" + str(len(label_2))
 
         # input_array = self.input_tokenization(up_seq)
-        input_array = self.input_tokenization_onehot(up_seq)
+        # input_array = self.input_tokenization_onehot(up_seq)
+        input_array = self.input_tokenization_kmer(up_seq, k=3)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
         return [(input_array, label_array_1, label_array_2)]
 
@@ -197,7 +233,8 @@ class Data_Loader:
             label_1 = read_base[i]
             label_2 = "N"
             # input_array = self.input_tokenization(up_seq)
-            input_array = self.input_tokenization_onehot(up_seq)
+            # input_array = self.input_tokenization_onehot(up_seq)
+            input_array = self.input_tokenization_kmer(up_seq, k=3)
             label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
             deletion_samples.append((input_array, label_array_1, label_array_2))
         return deletion_samples
@@ -238,4 +275,3 @@ class Data_Loader:
                 input_label_array = self.load_deletion(data_dict)
 
             return input_label_array
-
