@@ -1,10 +1,11 @@
 import os
 import hydra
 
-from model import *
-from models.baseline import Baseline
+from errorprediction.model import *
+from errorprediction.models.baseline import Baseline, Baseline_Kmer_In
+from errorprediction.data_loader_truth_input_training import Data_Loader
+
 from torchinfo import summary  # type: ignore
-from data_loader_truth_input_training import Data_Loader
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime
 from torch.utils.data import random_split
@@ -283,8 +284,8 @@ def main(config: DictConfig) -> None:
         train_ratio=config.training.train_ratio,
     )
 
-
     model = Baseline().to(device)
+    model = Baseline_Kmer_In(k=config.training.kmer).to(device)
 
     """
     model = ErrorPrediction(embed_size=config.training.embed_size, 
