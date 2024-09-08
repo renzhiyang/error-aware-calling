@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 
@@ -189,3 +190,73 @@ def ResNet1D_18(num_classes=10):
     return ResNet1D(
         ResidualBlock1D, [2, 2, 2, 2], in_channels=1, num_classes=num_classes
     )
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        seq_len = x.size(0)
+        print(f"position input shape: {x.shape}")
+        print(f"positional encoding shape: {self.pe.shape}")
+        x = x + self.pe[:, :seq_len]
+        return x
+
+
+class Encoder_Transformer(nn.Module):
+    def __init__(
+        self,
+        embed_size=56,
+        vocab_size=6,
+        heads=6,
+        num_layers=2,
+        forward_expansion=1024,
+        seq_len=99,
+        dropout_rate=0.1,
+        num_class1=5,
+        num_class2=25,
+    ):
+        super(Encoder_Transformer, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.pos_endocer = PositionalEncoding(embed_size, max_len=seq_len)
+
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=embed_size,
+            nhead=heads,
+            activation="relu",
+            batch_first=True,
+            dropout=dropout_rate,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers, num_layers=num_layers
+        )
+
+        self.fc1 = nn.Linear(embed_size * seq_len, num_class1)  # For the 1x5 output
+        self.fc2 = nn.Linear(embed_size * seq_len, num_class2)  # For the 1x25 output
+
+    def forward(self, x):
+        x = x.long()
+        batch_size, seq_len = x.size()
+
+        x = self.embedding(x)
+        # x = self.pos_endocer(x.transpose(0, 1))
+
+        encoded_output = self.transformer_encoder(x)
+        encoded_output = (
+            encoded_output.transpose(0, 1).contiguous().view(batch_size, -1)
+        )
+
+        output_1 = self.fc1(encoded_output)
+        output_2 = self.fc2(encoded_output)
+
+        return output_1, output_2

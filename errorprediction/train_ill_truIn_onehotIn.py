@@ -1,6 +1,8 @@
 import os
 import hydra
 
+import errorprediction.models.nets as nets
+
 from errorprediction.model import *
 from errorprediction.models.baseline import Baseline, Baseline_Kmer_In
 from errorprediction.data_loader_truth_input_training import Data_Loader
@@ -271,6 +273,7 @@ def test_only_first(model, test_loader, criterion):
     config_name="defaults.yaml",
 )
 def main(config: DictConfig) -> None:
+    os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     config = config.error_prediction
     print(OmegaConf.to_yaml(config), flush=True)
     dataset = Data_Loader(
@@ -284,19 +287,32 @@ def main(config: DictConfig) -> None:
         train_ratio=config.training.train_ratio,
     )
 
-    model = Baseline().to(device)
-    model = Baseline_Kmer_In(k=config.training.kmer).to(device)
+    # model = Baseline().to(device)
+    # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
+
+    model = nets.Encoder_Transformer(
+        embed_size=config.training.embed_size,
+        vocab_size=config.training.num_tokens,
+        num_layers=config.training.num_layers,
+        forward_expansion=config.training.forward_expansion,
+        seq_len=config.training.max_length - config.training.kmer + 1,
+        dropout_rate=config.training.drop_out,
+        num_class1=config.training.num_class_1,
+        num_class2=config.training.num_class_2,
+    ).to(device)
 
     """
-    model = ErrorPrediction(embed_size=config.training.embed_size, 
-                            heads=config.training.heads, 
-                            num_layers=config.training.num_layers,
-                            forward_expansion=config.training.forward_expansion, 
-                            num_tokens=config.training.num_tokens,
-                            num_bases = config.training.num_bases,
-                            dropout_rate=config.training.dropout_rate, 
-                            max_length=config.training.max_length,
-                            output_length=config.training.label_length).to(device)
+    model = ErrorPrediction(
+        embed_size=config.training.embed_size,
+        heads=config.training.heads,
+        num_layers=config.training.num_layers,
+        forward_expansion=config.training.forward_expansion,
+        num_tokens=config.training.num_tokens,
+        num_bases=config.training.num_bases,
+        dropout_rate=config.training.dropout_rate,
+        max_length=config.training.max_length - config.training.kmer + 1,
+        output_length=config.training.label_length,
+    ).to(device)
     """
     """
     model = LSTM(num_tokens=config.training.num_tokens,
