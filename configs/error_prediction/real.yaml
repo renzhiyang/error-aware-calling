@@ -1,5 +1,5 @@
 data_path:
-  label_f: /home/yang1031/projects/error-aware-calling/data/illumina/label_tiny_10000
+  label_f: /home/yang1031/projects/error-aware-calling/data/illumina/label_tiny_300000
 
 training:
   model_path: /home/yang1031/projects/error-aware-calling/errorprediction/model_saved
