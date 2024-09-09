@@ -1,6 +1,7 @@
 import numpy as np
 
 VOCAB = {"A": 1, "C": 2, "G": 3, "T": 4, "-": 5, "N": 6}
+VOCAB_KMER = {"N": 0, "A": 1, "C": 2, "G": 3, "T": 4, "-": 5}
 CLASSES_PROB_1 = ["A", "C", "G", "T", "-"]
 CLASSES_PROB_2 = [
     "N",
@@ -115,3 +116,26 @@ def one_hot_seq(seq):
         if char in VOCAB:
             one_hot[i, VOCAB[char] - 1] = 1
     return one_hot
+
+def kmer_seq(seq, k=3):
+    len_seq = len(seq)
+    len_vocab = len(VOCAB_KMER)
+
+    kmer_encodings = []
+
+    if len_seq < k:
+        return None
+    
+    for i in range(len_seq - k + 1):
+        kmer = seq[i: i + k]
+        kmer_value = 0
+        for j, char in enumerate(kmer):
+            if char not in VOCAB_KMER:
+                return None
+            kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))
+
+        kmer_encodings.append(kmer_value)
+
+    kmer_encodings = np.array(kmer_encodings, dtype=np.float32)
+    return kmer_encodings
+

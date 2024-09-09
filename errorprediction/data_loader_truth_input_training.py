@@ -201,6 +201,12 @@ class Data_Loader:
         # TODO: 这里需要对中间输出文件进行修改，reverse strand中的Label之后要换成read base
         label_1 = data_dict["read_base"][0]
         label_2 = data_dict["read_base"][1:]
+
+        # TODO: don't know why now
+        # A bug, sometimes label_2 is "AN" or some string with "N"
+        if len(label_2) > 1:
+            label_2 = label_2.replace("N", "")
+
         if read_strand == "reverse":
             label_1 = data_dict["seq_around"][-1]
             label_2 = reverse_complement(label_2)
