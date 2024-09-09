@@ -91,6 +91,8 @@ def train(
             # print(f'num: {i+1}, input shape:{inputs.shape}')
             # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
             next_base, insertion = model(inputs)
+            # print(f"training next_base: {next_base}, training label: {labels_1}")
+            # print(f"training insertion: {insertion}, training label: {labels_2}")
 
             loss_1 = criterion_1(next_base, labels_1)
             loss_2 = criterion_2(insertion, labels_2)
@@ -107,7 +109,7 @@ def train(
         writer.add_scalar("Accuracy/test", accuracy, epoch)
         writer.flush()
         print(
-            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}",
+            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss_train: {epoch_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f}",
             flush=True,
         )
 
@@ -331,6 +333,8 @@ def main(config: DictConfig) -> None:
     """
     # output model structure
     # onnx_input = torch.ones((40,99,6)).to(device)
+    # onnx_input = torch.ones((40, 97)).to(device)
+    # summary(model, input_size=(40, 97), device=device, depth=4)
     # summary(model, input_size=(40,99,6), device=device, depth=4)
     # onnx_input = torch.ones((40,99)).to(device)
 
@@ -357,6 +361,6 @@ if __name__ == "__main__":
     torch.set_printoptions(threshold=10_000)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     start_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    writer = SummaryWriter(f"runs/experiment-{start_time}")
+    writer = SummaryWriter(f"./errorprediction/runs/experiment-{start_time}")
     print(device, flush=True)
     main()

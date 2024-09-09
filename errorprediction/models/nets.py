@@ -207,8 +207,8 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         seq_len = x.size(0)
-        print(f"position input shape: {x.shape}")
-        print(f"positional encoding shape: {self.pe.shape}")
+        # print(f"position input shape: {x.shape}")
+        # print(f"positional encoding shape: {self.pe.shape}")
         x = x + self.pe[:, :seq_len]
         return x
 
@@ -249,7 +249,7 @@ class Encoder_Transformer(nn.Module):
         batch_size, seq_len = x.size()
 
         x = self.embedding(x)
-        # x = self.pos_endocer(x.transpose(0, 1))
+        x = self.pos_endocer(x.transpose(0, 1))
 
         encoded_output = self.transformer_encoder(x)
         encoded_output = (
