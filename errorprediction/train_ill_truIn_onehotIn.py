@@ -1,6 +1,8 @@
 import os
 import hydra
 
+import errorprediction.models.nets as nets
+
 from errorprediction.model import *
 from errorprediction.models.baseline import Baseline, Baseline_Kmer_In
 from errorprediction.data_loader_truth_input_training import Data_Loader
@@ -89,6 +91,8 @@ def train(
             # print(f'num: {i+1}, input shape:{inputs.shape}')
             # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
             next_base, insertion = model(inputs)
+            # print(f"training next_base: {next_base}, training label: {labels_1}")
+            # print(f"training insertion: {insertion}, training label: {labels_2}")
 
             loss_1 = criterion_1(next_base, labels_1)
             loss_2 = criterion_2(insertion, labels_2)
@@ -105,7 +109,7 @@ def train(
         writer.add_scalar("Accuracy/test", accuracy, epoch)
         writer.flush()
         print(
-            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}",
+            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss_train: {epoch_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f}",
             flush=True,
         )
 
@@ -271,6 +275,7 @@ def test_only_first(model, test_loader, criterion):
     config_name="defaults.yaml",
 )
 def main(config: DictConfig) -> None:
+    os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     config = config.error_prediction
     print(OmegaConf.to_yaml(config), flush=True)
     dataset = Data_Loader(
@@ -284,19 +289,32 @@ def main(config: DictConfig) -> None:
         train_ratio=config.training.train_ratio,
     )
 
-    model = Baseline().to(device)
-    model = Baseline_Kmer_In(k=config.training.kmer).to(device)
+    # model = Baseline().to(device)
+    # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
+
+    model = nets.Encoder_Transformer(
+        embed_size=config.training.embed_size,
+        vocab_size=config.training.num_tokens,
+        num_layers=config.training.num_layers,
+        forward_expansion=config.training.forward_expansion,
+        seq_len=config.training.max_length - config.training.kmer + 1,
+        dropout_rate=config.training.drop_out,
+        num_class1=config.training.num_class_1,
+        num_class2=config.training.num_class_2,
+    ).to(device)
 
     """
-    model = ErrorPrediction(embed_size=config.training.embed_size, 
-                            heads=config.training.heads, 
-                            num_layers=config.training.num_layers,
-                            forward_expansion=config.training.forward_expansion, 
-                            num_tokens=config.training.num_tokens,
-                            num_bases = config.training.num_bases,
-                            dropout_rate=config.training.dropout_rate, 
-                            max_length=config.training.max_length,
-                            output_length=config.training.label_length).to(device)
+    model = ErrorPrediction(
+        embed_size=config.training.embed_size,
+        heads=config.training.heads,
+        num_layers=config.training.num_layers,
+        forward_expansion=config.training.forward_expansion,
+        num_tokens=config.training.num_tokens,
+        num_bases=config.training.num_bases,
+        dropout_rate=config.training.dropout_rate,
+        max_length=config.training.max_length - config.training.kmer + 1,
+        output_length=config.training.label_length,
+    ).to(device)
     """
     """
     model = LSTM(num_tokens=config.training.num_tokens,
@@ -315,6 +333,8 @@ def main(config: DictConfig) -> None:
     """
     # output model structure
     # onnx_input = torch.ones((40,99,6)).to(device)
+    # onnx_input = torch.ones((40, 97)).to(device)
+    # summary(model, input_size=(40, 97), device=device, depth=4)
     # summary(model, input_size=(40,99,6), device=device, depth=4)
     # onnx_input = torch.ones((40,99)).to(device)
 
@@ -341,6 +361,6 @@ if __name__ == "__main__":
     torch.set_printoptions(threshold=10_000)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     start_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    writer = SummaryWriter(f"runs/experiment-{start_time}")
+    writer = SummaryWriter(f"./errorprediction/runs/experiment-{start_time}")
     print(device, flush=True)
     main()
