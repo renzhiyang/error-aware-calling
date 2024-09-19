@@ -17,10 +17,9 @@ training:
   num_class_1: 5
   num_class_2: 25
   dropout_rate: 0.5
-  max_length: 99
   learning_rate: 0.001
   epochs: 100
   label_length: 20
-  up_seq_len: 99
+  up_seq_len: 30
   drop_out: 0.1
   kmer: 3
