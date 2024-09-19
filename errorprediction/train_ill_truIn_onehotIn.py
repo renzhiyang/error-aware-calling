@@ -291,18 +291,24 @@ def main(config: DictConfig) -> None:
 
     # model = Baseline().to(device)
     # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
-
+    model = nets.LSTM_simple(
+        seq_len=config.training.up_seq_len - config.training.kmer + 1,
+        num_layers=1,
+        num_class1=config.training.num_class_1,
+        num_class2=config.training.num_class_2,
+    ).to(device)
+    """
     model = nets.Encoder_Transformer(
         embed_size=config.training.embed_size,
         vocab_size=config.training.num_tokens,
         num_layers=config.training.num_layers,
         forward_expansion=config.training.forward_expansion,
-        seq_len=config.training.max_length - config.training.kmer + 1,
+        seq_len=config.training.up_seq_len - config.training.kmer + 1,
         dropout_rate=config.training.drop_out,
         num_class1=config.training.num_class_1,
         num_class2=config.training.num_class_2,
     ).to(device)
-
+    """
     """
     model = ErrorPrediction(
         embed_size=config.training.embed_size,
@@ -334,8 +340,12 @@ def main(config: DictConfig) -> None:
     # output model structure
     # onnx_input = torch.ones((40,99,6)).to(device)
     # onnx_input = torch.ones((40, 97)).to(device)
-    # summary(model, input_size=(40, 97), device=device, depth=4)
-    # summary(model, input_size=(40,99,6), device=device, depth=4)
+    summary(
+        model,
+        input_size=(40, config.training.up_seq_len - config.training.kmer + 1),
+        device=device,
+        depth=4,
+    )
     # onnx_input = torch.ones((40,99)).to(device)
 
     # summary(model, input_size=(40,99), device=device, depth=4)

@@ -5,6 +5,7 @@ import torch
 import argparse
 
 import src.bayesian as bayesian
+import errorprediction.models.nets as nets
 import src.utils as utils
 import numpy as np
 
@@ -22,8 +23,7 @@ class TensorData:
         with open(file_path, "r") as f:
             offset = 0
             for line in f:
-                if self.total_lines % self.chunk_size == 0:
-                    self.line_offset.append(offset)
+                self.line_offset.append(offset)
                 offset += len(line)
                 self.total_lines += 1
 
@@ -31,13 +31,12 @@ class TensorData:
         return self.total_lines
 
     def __getitem__(self, idx):
-        chunk_idx = idx // self.chunk_size
-        line_idx = idx % self.chunk_size
+        if idx < 0 or idx >= self.total_lines:
+            raise IndexError("Index out of range")
 
         with open(self.file_path, "r") as f:
-            f.seek(self.line_offset[chunk_idx])
-            for _ in range(line_idx):
-                f.readline()
+            # print(f"idx: {idx}, line_offset: {self.line_offset[idx]}")
+            f.seek(self.line_offset[idx])
             line = f.readline().strip().split("\t")
 
             id = line[0]
@@ -45,13 +44,11 @@ class TensorData:
             observe_b = str(line[2])
             observe_ins = str(line[3])
 
-            # print(f"ob:{observe_b}, oi:{observe_ins}")
-
             position = int(id.split("_")[1])
             index = int(id.split("_")[2])
 
-            tensor_one_hot = utils.one_hot_seq(input_seq)
-            return position, tensor_one_hot, observe_b, observe_ins
+            tensor_kmer = utils.kmer_seq(input_seq, k=3)
+            return position, index, tensor_kmer, observe_b, observe_ins
 
 
 def normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -74,20 +71,30 @@ def predict(args):
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if torch.device("mps"):
-        device = torch.device("mps")
+    # if torch.device("mps"):
+    #    device = torch.device("mps")
 
     print(f"device: {device}")
-    model = Baseline().to(device)
+    # model = Baseline().to(device)
+    model = nets.Encoder_Transformer(
+        embed_size=54,
+        vocab_size=216,
+        num_layers=1,
+        forward_expansion=1024,
+        seq_len=97,
+        dropout_rate=0.1,
+        num_class1=5,
+        num_class2=25,
+    ).to(device)
     model.load_state_dict(torch.load(model_fn, map_location=device))
     model.eval()
 
     dataset = TensorData(tensor_fn)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)  # type: ignore
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)  # type: ignore
     caller = bayesian.BayesianCaller()
     pos_probs_in_pos = {}  # key:position, value: all reads' posterior probs dict
     # count = 0
-    for position, tensor_one_hot, observe_b, observe_ins in dataloader:
+    for position, idx, tensor_one_hot, observe_b, observe_ins in dataloader:
         # test codes
         # count += 1
         # if count >= 1000:
@@ -137,6 +144,84 @@ def predict(args):
         print(f"position: {pos}, most likelily genotype: {next(iter(sorted_probs))}")
 
 
+def predict_kmer(args):
+    model_fn = args.model
+    tensor_fn = args.tensor_fn
+
+    # check file path
+    if not os.path.exists(model_fn):
+        print(f"Error: Model file '{model_fn}' does not exist.")
+        return
+    if not os.path.isfile(tensor_fn):
+        print(f"Error: Tensor file '{tensor_fn}' does not exist.")
+        return
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tensor_f = open(tensor_fn, "r")
+    caller = bayesian.BayesianCaller()
+
+    print(f"device: {device}")
+    # model = Baseline().to(device)
+    model = nets.Encoder_Transformer(
+        embed_size=54,
+        vocab_size=216,
+        num_layers=1,
+        forward_expansion=1024,
+        seq_len=97,
+        dropout_rate=0.1,
+        num_class1=5,
+        num_class2=25,
+    ).to(device)
+    model.load_state_dict(torch.load(model_fn, map_location=device))
+    model.eval()
+
+    cur_pos = 0
+    cur_probs = {}
+    for line in tensor_f:
+        line = line.strip().split()
+
+        id = line[0]
+        input_seq = line[1]
+        observe_b = str(line[2])
+        observe_ins = str(line[3])
+
+        position = int(id.split("_")[1])
+        index = int(id.split("_")[2])
+
+        if cur_pos != position:
+            if cur_pos != 0:
+                sorted_probs = sorted(
+                    cur_probs.items(), key=lambda x: x[1], reverse=True
+                )
+                print(
+                    f"position: {cur_pos}, most likelily genotype: {sorted_probs[:5]}"
+                )
+            cur_pos = position
+            cur_probs = []
+
+        tensor_kmer = utils.kmer_seq(input_seq, k=3)
+        tensor_kmer = torch.tensor(tensor_kmer).float().unsqueeze(0).to(device)
+        next_base_dis, insertion_dis = model(tensor_kmer)
+        next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
+        insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
+
+        next_base_dis = normalize_tensor(next_base_dis)
+        insertion_base_dis = normalize_tensor(insertion_base_dis)
+
+        all_genotype_pos_probs_one_read = (
+            caller.all_genotypes_posterior_prob_per_read_log(
+                next_base_dis, insertion_base_dis, observe_b, observe_ins
+            )
+        )
+
+        if len(cur_probs) == 0:
+            cur_probs = all_genotype_pos_probs_one_read
+        else:
+            cur_probs = caller.multiply_pos_probs_of_two_reads(
+                cur_probs, all_genotype_pos_probs_one_read
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="call variants using fine-turned model"
@@ -151,7 +236,8 @@ def main():
         "--tensor_fn", type=str, help="tensor file generate by generate_tensor.py"
     )
     args = parser.parse_args()
-    predict(args)
+    # predict(args)
+    predict_kmer(args)
 
 
 if __name__ == "__main__":

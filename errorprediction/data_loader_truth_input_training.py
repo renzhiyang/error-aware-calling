@@ -188,9 +188,9 @@ class Data_Loader:
 
         # print(data_dict['pos'], label_1, label_2)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
-        # input_array = self.input_tokenization(up_seq) # without one hot encoding
+        # input_array = self.input_tokenization(up_seq)  # without any encoding
         # input_array = self.input_tokenization_onehot(up_seq)  # with one hot encoding
-        input_array = self.input_tokenization_kmer(up_seq, k=3)
+        input_array = self.input_tokenization_kmer(up_seq, k=3)  # with k-mer encoding
         # return input_array, label_array_1, label_array_2
         return [(input_array, label_array_1, label_array_2)]
 
@@ -266,7 +266,7 @@ class Data_Loader:
                 return None
             if (
                 data_dict["variant_type"] in ["SNV", "Insertion", "Deletion"]
-                and len(data_dict["seq_around"]) != 100
+                and len(data_dict["seq_around"]) != self.config.training.up_seq_len + 1
             ):
                 return None
 
