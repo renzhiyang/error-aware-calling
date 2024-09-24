@@ -8,6 +8,7 @@ from errorprediction.utils import *
 
 VOCAB = {"A": 1, "C": 2, "G": 3, "T": 4, "-": 5, "N": 6}
 VOCAB_KMER = {"N": 0, "A": 1, "C": 2, "G": 3, "T": 4, "-": 5}
+VOCAB_KMER_SIMULATE = {"N": 0, "A":1, "C":2, "G":3, "T":4}
 CLASSES_PROB_1 = ["A", "C", "G", "T", "-"]
 CLASSES_PROB_2 = [
     "N",
@@ -122,7 +123,8 @@ class Data_Loader:
         Encode input sequence with k-mer
         """
         len_seq = len(input_seq)
-        len_vocab = len(VOCAB_KMER)
+        # len_vocab = len(VOCAB_KMER) # for real case
+        len_vocab = len(VOCAB_KMER_SIMULATE) # for simulate data
 
         # Initialize an empty list to store k-mer encoding
         kmer_encodings = []
@@ -138,10 +140,13 @@ class Data_Loader:
             # Convert k-mer into numerical encoding based on VOCAB
             kmer_value = 0
             for j, char in enumerate(kmer):
-                if char not in VOCAB_KMER:
+                #if char not in VOCAB_KMER: # for real data
+                if char not in VOCAB_KMER_SIMULATE: # for simulate data
                     return None  # Handle unkwon characters
+
                 # Calculate the unique value for the k-mer
-                kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))
+                kmer_value += VOCAB_KMER_SIMULATE[char] * (len_vocab ** (k - j - 1)) # for simulate data
+                #kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))  # for real data
 
             # Append the encoded k-mer value to the list
             kmer_encodings.append(kmer_value)
@@ -186,12 +191,17 @@ class Data_Loader:
         if label_1 == "N":
             label_1 = "-"
 
-        # print(data_dict['pos'], label_1, label_2)
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
-        # input_array = self.input_tokenization(up_seq)  # without any encoding
-        # input_array = self.input_tokenization_onehot(up_seq)  # with one hot encoding
-        input_array = self.input_tokenization_kmer(up_seq, k=3)  # with k-mer encoding
-        # return input_array, label_array_1, label_array_2
+        if self.config.training.encoder == "onehot":
+            input_array = self.input_tokenization_onehot(
+                up_seq
+            )  # with one hot encoding
+        elif self.config.training.encoder == "kmer":
+            input_array = self.input_tokenization_kmer(
+                up_seq, k=self.config.training.kmer
+            )  # with k-mer encoding
+        else:
+            input_array = self.input_tokenization(up_seq)  # without any encoding
         return [(input_array, label_array_1, label_array_2)]
 
     def load_insertion(self, data_dict):
@@ -214,9 +224,16 @@ class Data_Loader:
         if len(label_2) >= 3:
             label_2 = "rep" + str(len(label_2))
 
-        # input_array = self.input_tokenization(up_seq)
-        # input_array = self.input_tokenization_onehot(up_seq)
-        input_array = self.input_tokenization_kmer(up_seq, k=3)
+        if self.config.training.encoder == "onehot":
+            input_array = self.input_tokenization_onehot(
+                up_seq
+            )  # with one hot encoding
+        elif self.config.training.encoder == "kmer":
+            input_array = self.input_tokenization_kmer(
+                up_seq, k=self.config.training.kmer
+            )  # with k-mer encoding
+        else:
+            input_array = self.input_tokenization(up_seq)  # without any encoding
         label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
         return [(input_array, label_array_1, label_array_2)]
 
@@ -238,9 +255,16 @@ class Data_Loader:
             up_seq = seq_around[i:] + "-" * i
             label_1 = read_base[i]
             label_2 = "N"
-            # input_array = self.input_tokenization(up_seq)
-            # input_array = self.input_tokenization_onehot(up_seq)
-            input_array = self.input_tokenization_kmer(up_seq, k=3)
+            if self.config.training.encoder == "onehot":
+                input_array = self.input_tokenization_onehot(
+                    up_seq
+                )  # with one hot encoding
+            elif self.config.training.encoder == "kmer":
+                input_array = self.input_tokenization_kmer(
+                    up_seq, k=self.config.training.kmer
+                )  # with k-mer encoding
+            else:
+                input_array = self.input_tokenization(up_seq)  # without any encoding
             label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
             deletion_samples.append((input_array, label_array_1, label_array_2))
         return deletion_samples

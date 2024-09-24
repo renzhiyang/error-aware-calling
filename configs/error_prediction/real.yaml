@@ -8,11 +8,12 @@ training:
   data_loader_chunk_size: 1000
   batch_size: 40
   train_ratio: 0.7
+  with_embedding: True
   embed_size: 54
-  num_layers: 1
+  num_layers: 2
   heads: 6
   forward_expansion: 1024
-  num_tokens: 216
+  num_tokens: 6
   num_bases: 5
   num_class_1: 5
   num_class_2: 25
@@ -23,3 +24,5 @@ training:
   up_seq_len: 30
   drop_out: 0.1
   kmer: 3
+  encoder: onehot # kmer, onehot, 
+  model: encoder_transformer # transformer, lstm, encoder_transformer_noembedding
