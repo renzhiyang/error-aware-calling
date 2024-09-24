@@ -277,7 +277,6 @@ class LSTM(nn.Module):
         self.fc2 = nn.Linear(hidden_dim, num_class_2)
 
     def forward(self, x):
-        print(f"input shape: {x.shape}")
         x = x.long()
         x = self.embedding(x)
         # print(f'after embedding: {x.shape}')

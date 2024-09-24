@@ -1,5 +1,5 @@
 data_path:
-  label_f: /home/yang1031/projects/error-aware-calling/data/illumina/simulate_data
+  label_f: /home/yang1031/projects/error-aware-calling/data/illumina/label_tiny_300000
 
 training:
   model_path: /home/yang1031/projects/error-aware-calling/errorprediction/model_saved
@@ -8,18 +8,20 @@ training:
   data_loader_chunk_size: 1000
   batch_size: 40
   train_ratio: 0.7
-  embed_size: 6
-  num_layers: 1
+  with_embedding: True
+  embed_size: 54
+  num_layers: 2
   heads: 6
   forward_expansion: 1024
-  num_tokens: 6
+  num_tokens: 5
   num_bases: 5
   num_class_1: 5
   num_class_2: 25
   dropout_rate: 0.5
-  max_length: 99
   learning_rate: 0.001
   epochs: 100
-  label_length: 20
-  up_seq_len: 99
+  up_seq_len: 30
+  drop_out: 0.1
   kmer: 3
+  encoder: onehot # kmer, onehot, 
+  model: encoder_transformer # encoder_transformer, lstm, encoder_transformer_noembedding

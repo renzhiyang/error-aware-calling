@@ -2,6 +2,8 @@ import math
 import torch
 import torch.nn as nn
 
+from turtle import forward
+
 
 class BasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
@@ -213,11 +215,90 @@ class PositionalEncoding(nn.Module):
         return x
 
 
+class LSTM_simple(nn.Module):
+    def __init__(
+        self, seq_len, hidden_size=128, num_layers=1, num_class1=5, num_class2=25
+    ):
+        super(LSTM_simple, self).__init__()
+        self.lstm = nn.LSTM(seq_len, hidden_size, num_layers, batch_first=True)
+
+        self.fc1 = nn.Linear(hidden_size, num_class1)
+        self.fc2 = nn.Linear(hidden_size, num_class2)
+
+    def forward(self, x):
+        lstm_out, (h_n, c_n) = self.lstm(x)
+
+        out1 = self.fc1(lstm_out)
+        out2 = self.fc2(lstm_out)
+        return out1, out2
+
+
 class Encoder_Transformer(nn.Module):
     def __init__(
         self,
         embed_size=56,
         vocab_size=6,
+        heads=6,
+        num_layers=2,
+        with_embedding=True,
+        forward_expansion=1024,
+        seq_len=99,
+        dropout_rate=0.1,
+        num_class1=5,
+        num_class2=25,
+    ):
+        super(Encoder_Transformer, self).__init__()
+        self.with_embedding = with_embedding
+        self.word_channels = embed_size if self.with_embedding else vocab_size
+        self.embedding = nn.Embedding(
+            vocab_size, embed_size
+        )  # just clear here, if not wth_emebdding, then not be used
+
+        self.pos_encoder = PositionalEncoding(self.word_channels, max_len=seq_len)
+
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=self.word_channels,
+            nhead=heads,
+            activation="relu",
+            dim_feedforward=forward_expansion,
+            batch_first=True,
+            dropout=dropout_rate,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers, num_layers=num_layers
+        )
+
+        self.fc1 = nn.Linear(
+            self.word_channels * seq_len, num_class1
+        )  # For the 1x5 output
+        self.fc2 = nn.Linear(
+            self.word_channels * seq_len, num_class2
+        )  # For the 1x25 output
+
+    def forward(self, x):
+        x = x.long()
+
+        if self.with_embedding:
+            batch_size, _ = x.size()
+            x = self.embedding(x)
+        else:
+            batch_size, _, _ = x.size()
+        x = self.pos_encoder(x.transpose(0, 1))
+
+        encoded_output = self.transformer_encoder(x.transpose(0,1))
+        encoded_output = (
+            encoded_output.contiguous().view(batch_size, -1)
+        )
+
+        output_1 = self.fc1(encoded_output)
+        output_2 = self.fc2(encoded_output)
+
+        return output_1, output_2
+
+
+class Encoder_Transformer_NoEmbedding(nn.Module):
+    def __init__(
+        self,
         heads=6,
         num_layers=2,
         forward_expansion=1024,
@@ -226,13 +307,14 @@ class Encoder_Transformer(nn.Module):
         num_class1=5,
         num_class2=25,
     ):
-        super(Encoder_Transformer, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.pos_endocer = PositionalEncoding(embed_size, max_len=seq_len)
+        super(Encoder_Transformer_NoEmbedding, self).__init__()
+
+        self.pos_encoder = PositionalEncoding(1, max_len=seq_len)
 
         encoder_layers = nn.TransformerEncoderLayer(
-            d_model=embed_size,
+            d_model=1,
             nhead=heads,
+            dim_feedforward=forward_expansion,
             activation="relu",
             batch_first=True,
             dropout=dropout_rate,
@@ -241,19 +323,19 @@ class Encoder_Transformer(nn.Module):
             encoder_layers, num_layers=num_layers
         )
 
-        self.fc1 = nn.Linear(embed_size * seq_len, num_class1)  # For the 1x5 output
-        self.fc2 = nn.Linear(embed_size * seq_len, num_class2)  # For the 1x25 output
+        self.fc1 = nn.Linear(1 * seq_len, num_class1)  # For the 1x5 output
+        self.fc2 = nn.Linear(1 * seq_len, num_class2)  # For the 1x25 output
 
     def forward(self, x):
         x = x.long()
-        batch_size, seq_len = x.size()
+        batch_size, _ = x.size()
 
-        x = self.embedding(x)
-        x = self.pos_endocer(x.transpose(0, 1))
+        x = x.unsqueeze(2)
+        x = self.pos_encoder(x.transpose(0, 1))
 
-        encoded_output = self.transformer_encoder(x)
+        encoded_output = self.transformer_encoder(x.transpose(0,1))
         encoded_output = (
-            encoded_output.transpose(0, 1).contiguous().view(batch_size, -1)
+            encoded_output.contiguous().view(batch_size, -1)
         )
 
         output_1 = self.fc1(encoded_output)

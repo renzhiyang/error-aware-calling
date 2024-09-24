@@ -69,10 +69,19 @@ def ensure_dir(file_path):
         os.makedirs(file_path)
 
 
+def log_weights(epoch, writer, model):
+    for name, param in model.named_parameters():
+        # log the weights of each layer
+        writer.add_histogram(f"{name}/weights", param, epoch)
+        # log the gradients of each layer
+        if param.grad is not None:
+            writer.add_histogram(f"{name}/gradients", param.grad, epoch)
+
+
 def train(
     model, train_loader, test_loader, criterion_1, criterion_2, optimizer, config
 ):
-    save_interval = 2
+    save_interval = 10
     epochs = config.training.epochs
     model_dir = config.training.model_path + "/" + start_time
     ensure_dir(model_dir)
@@ -107,9 +116,10 @@ def train(
         val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2)
         writer.add_scalar("Loss/test", val_loss, epoch)
         writer.add_scalar("Accuracy/test", accuracy, epoch)
+        log_weights(epoch, writer, model)
         writer.flush()
         print(
-            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss_train: {epoch_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f}",
+            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss_train: {epoch_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f} \n",
             flush=True,
         )
 
@@ -119,7 +129,7 @@ def train(
             )
             torch.save(model.state_dict(), model_save_path)
             # model.load_state_dict(torch.load(model_save_path, map_location=device))
-            print(f"Model saved at epoch {epoch+1}", flush=True)
+            print(f"Model saved at epoch {epoch+1} \n", flush=True)
 
 
 def test(model, test_loader, criterion_1, criterion_2):
@@ -289,62 +299,57 @@ def main(config: DictConfig) -> None:
         train_ratio=config.training.train_ratio,
     )
 
+    # update up_seq_len if the input encoder is kmer encoder
+    if config.training.encoder == "kmer":
+        config.training.up_seq_len = (
+            config.training.up_seq_len - config.training.kmer + 1
+        )
+
     # model = Baseline().to(device)
     # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
+    if config.training.model == "lstm":
+        model = nets.LSTM_simple(
+            seq_len=config.training.up_seq_len,
+            num_layers=config.training.num_layers,
+            num_class1=config.training.num_class_1,
+            num_class2=config.training.num_class_2,
+        ).to(device)
+    elif config.training.model == "encoder_transformer":
+        model = nets.Encoder_Transformer(
+            embed_size=config.training.embed_size,
+            vocab_size=config.training.num_tokens**config.training.kmer,
+            with_embedding=config.training.with_embedding,
+            num_layers=config.training.num_layers,
+            forward_expansion=config.training.forward_expansion,
+            seq_len=config.training.up_seq_len,
+            dropout_rate=config.training.drop_out,
+            num_class1=config.training.num_class_1,
+            num_class2=config.training.num_class_2,
+        ).to(device)
+    else:
+        model = nets.Encoder_Transformer_NoEmbedding(
+            heads=config.training.heads,
+            num_layers=config.training.num_layers,
+            seq_len=config.training.up_seq_len,
+            dropout_rate=config.training.drop_out,
+            forward_expansion=config.training.forward_expansion,
+            num_class1=config.training.num_class_1,
+            num_class2=config.training.num_class_2,
+        ).to(device)
 
-    model = nets.Encoder_Transformer(
-        embed_size=config.training.embed_size,
-        vocab_size=config.training.num_tokens,
-        num_layers=config.training.num_layers,
-        forward_expansion=config.training.forward_expansion,
-        seq_len=config.training.max_length - config.training.kmer + 1,
-        dropout_rate=config.training.drop_out,
-        num_class1=config.training.num_class_1,
-        num_class2=config.training.num_class_2,
-    ).to(device)
+    summary(
+        model,
+        input_size=(40, config.training.up_seq_len),
+        device=device,
+        depth=4,
+    )
 
-    """
-    model = ErrorPrediction(
-        embed_size=config.training.embed_size,
-        heads=config.training.heads,
-        num_layers=config.training.num_layers,
-        forward_expansion=config.training.forward_expansion,
-        num_tokens=config.training.num_tokens,
-        num_bases=config.training.num_bases,
-        dropout_rate=config.training.dropout_rate,
-        max_length=config.training.max_length - config.training.kmer + 1,
-        output_length=config.training.label_length,
-    ).to(device)
-    """
-    """
-    model = LSTM(num_tokens=config.training.num_tokens,
-                 embed_size=config.training.embed_size,
-                 num_class_1=config.training.num_class_1,
-                 num_class_2=config.training.num_class_2,
-                 hidden_dim=128,
-                 num_layers=2,
-                 dropout_rate=config.training.dropout_rate).to(device)
-    """
-    """
-    model = conv_model(channels=config.training.num_tokens,
-                       num_class_1=config.training.num_class_1,
-                       num_class_2=config.training.num_class_2,
-                       dropout_rate=config.training.dropout_rate).to(device)
-    """
-    # output model structure
-    # onnx_input = torch.ones((40,99,6)).to(device)
-    # onnx_input = torch.ones((40, 97)).to(device)
-    # summary(model, input_size=(40, 97), device=device, depth=4)
-    # summary(model, input_size=(40,99,6), device=device, depth=4)
-    # onnx_input = torch.ones((40,99)).to(device)
-
-    # summary(model, input_size=(40,99), device=device, depth=4)
-
-    # print(f'pytorch version: {torch.__version__}', flush=True)
-    # torch.onnx.export(model, onnx_input, 'model_2class.onnx',  # type: ignore
-    #                  input_names=["input sequence"], output_names=["prediction"])
     # tensorboard visualize model
-    # writer.add_graph(model, onnx_input)
+    # dummy_input = torch.rand(config.training.batch_size, config.training.up_seq_len).to(
+    #    device
+    # )
+    # writer.add_graph(model, dummy_input)
+
     criterion_1 = nn.CrossEntropyLoss()
     criterion_2 = nn.CrossEntropyLoss()
     # optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3)
