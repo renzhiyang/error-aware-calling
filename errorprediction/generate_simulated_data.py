@@ -54,7 +54,7 @@ class Simulater:
                 continue
             self.__print_data_from_read(read)
 
-    def __print_seq(self, query_seq):
+    def __print_seq(self, query_pos, query_seq):
         if self.is_padding_N:
             query_seq = "N" * (self.up_len // 2) + query_seq
 
@@ -65,6 +65,7 @@ class Simulater:
         sequence_around = ""
         end_pointer = len_seq - self.up_len
         for i in range(end_pointer + 1):
+            pos = query_pos + i
             sequence_around = query_seq[i : i + self.up_len + 1]
             read_base = sequence_around[-1]
             ref_base = sequence_around[-1]
@@ -72,7 +73,7 @@ class Simulater:
                 chrom="simulate",
                 type="Positive",
                 read_strand="forward",
-                position=100000,
+                position=pos,
                 label=ref_base,
                 read_base=read_base,
                 ref_base=ref_base,
@@ -82,6 +83,8 @@ class Simulater:
                 sequence_around=sequence_around,
                 file_p=self.out_file,
             )
+            # only print one for each sequence now
+            break
 
     def __print_data_from_read(self, read):
         read = read.split("\t")
@@ -90,15 +93,15 @@ class Simulater:
         CIGAR = read[5]
         SEQ = read[9].upper()
         STRAND = "forward" if FLAG & 16 == 0 else "reverse"
-        MD = None
+        MD = ""
 
         # Get the MD tag
         for field in read:
             if field.startswith("MD:Z:"):
                 MD = field[5:]
                 break
-        if MD is None:
-            print("MD is None")
+        if not MD.isdigit():
+            return
 
         # Get the original sequence if the read is mapped to the reverse strand
         if STRAND == "reverse":
@@ -110,6 +113,7 @@ class Simulater:
 
         length = 0
         query_index = 0
+        query_pos = QUERY_POS
         for b in CIGAR:
             if b.isdigit():
                 length = length * 10 + int(b)
@@ -120,7 +124,7 @@ class Simulater:
 
             elif b in "MX=":
                 query_seq = SEQ[query_index : query_index + length]
-                self.__print_seq(query_seq)
+                self.__print_seq(query_pos, query_seq)
 
 
 def generate_simulate_data(args):

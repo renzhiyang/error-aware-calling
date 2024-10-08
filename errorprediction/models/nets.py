@@ -2,8 +2,6 @@ import math
 import torch
 import torch.nn as nn
 
-from turtle import forward
-
 
 class BasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
@@ -285,10 +283,8 @@ class Encoder_Transformer(nn.Module):
             batch_size, _, _ = x.size()
         x = self.pos_encoder(x.transpose(0, 1))
 
-        encoded_output = self.transformer_encoder(x.transpose(0,1))
-        encoded_output = (
-            encoded_output.contiguous().view(batch_size, -1)
-        )
+        encoded_output = self.transformer_encoder(x.transpose(0, 1))
+        encoded_output = encoded_output.contiguous().view(batch_size, -1)
 
         output_1 = self.fc1(encoded_output)
         output_2 = self.fc2(encoded_output)
@@ -333,10 +329,8 @@ class Encoder_Transformer_NoEmbedding(nn.Module):
         x = x.unsqueeze(2)
         x = self.pos_encoder(x.transpose(0, 1))
 
-        encoded_output = self.transformer_encoder(x.transpose(0,1))
-        encoded_output = (
-            encoded_output.contiguous().view(batch_size, -1)
-        )
+        encoded_output = self.transformer_encoder(x.transpose(0, 1))
+        encoded_output = encoded_output.contiguous().view(batch_size, -1)
 
         output_1 = self.fc1(encoded_output)
         output_2 = self.fc2(encoded_output)
