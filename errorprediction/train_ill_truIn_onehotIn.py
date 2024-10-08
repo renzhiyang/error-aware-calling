@@ -1,9 +1,12 @@
 import os
 import hydra
+import torch
+import torch.nn as nn
 
 import errorprediction.models.nets as nets
+import errorprediction.utils as utils
 
-from errorprediction.model import *
+# from errorprediction.model import *
 from errorprediction.models.baseline import Baseline, Baseline_Kmer_In
 from errorprediction.data_loader_truth_input_training import Data_Loader
 
@@ -11,7 +14,7 @@ from torchinfo import summary  # type: ignore
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime
 from torch.utils.data import random_split
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter  # type: ignore
 
 
@@ -79,7 +82,14 @@ def log_weights(epoch, writer, model):
 
 
 def train(
-    model, train_loader, test_loader, criterion_1, criterion_2, optimizer, config
+    model,
+    train_loader,
+    test_loader,
+    criterion_1,
+    criterion_2,
+    optimizer,
+    writer,
+    config,
 ):
     save_interval = 10
     epochs = config.training.epochs
@@ -113,7 +123,7 @@ def train(
         epoch_loss = running_loss / len(train_loader)
         writer.add_scalar("Loss/train", epoch_loss, epoch)
 
-        val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2)
+        val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2, config)
         writer.add_scalar("Loss/test", val_loss, epoch)
         writer.add_scalar("Accuracy/test", accuracy, epoch)
         log_weights(epoch, writer, model)
@@ -132,7 +142,7 @@ def train(
             print(f"Model saved at epoch {epoch+1} \n", flush=True)
 
 
-def test(model, test_loader, criterion_1, criterion_2):
+def test(model, test_loader, criterion_1, criterion_2, config):
     model.eval()
     running_loss = 0.0
     correct = 0
@@ -171,6 +181,10 @@ def test(model, test_loader, criterion_1, criterion_2):
             for i in range(next_base.shape[0]):
                 if next_base[i] == true_next_base[i]:
                     next_base_correct += 1
+                    # else:
+                    #    print(
+                    #        f"input: {utils.decode_kmer(inputs[i], k=config.training.kmer)}, next_base: {utils.CLASSES_PROB_1[next_base[i]]}, true_next_base: {utils.CLASSES_PROB_1[true_next_base[i]]}"
+                    #    )
                 if insertion[i] == true_insertion[i]:
                     insertion_correct += 1
                 if (
@@ -187,7 +201,9 @@ def test(model, test_loader, criterion_1, criterion_2):
     return val_loss, accuracy
 
 
-def train_only_first(model, train_loader, test_loader, criterion, optimizer, config):
+def train_only_first(
+    model, train_loader, test_loader, criterion, optimizer, writer, config
+):
     save_interval = 10
     epochs = config.training.epochs
     model_dir = config.training.model_path + "/" + start_time
@@ -288,6 +304,9 @@ def main(config: DictConfig) -> None:
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
     config = config.error_prediction
     print(OmegaConf.to_yaml(config), flush=True)
+
+    # tensorboard
+    writer = SummaryWriter(config.data_path.tensorboard_f)
     dataset = Data_Loader(
         file_path=config.data_path.label_f,
         config=config,
@@ -317,11 +336,12 @@ def main(config: DictConfig) -> None:
     elif config.training.model == "encoder_transformer":
         model = nets.Encoder_Transformer(
             embed_size=config.training.embed_size,
-            vocab_size=config.training.num_tokens**config.training.kmer,
+            vocab_size=config.training.num_tokens**config.training.kmer
+            + utils.KMER_TOKEN_SHIFT,
             with_embedding=config.training.with_embedding,
             num_layers=config.training.num_layers,
             forward_expansion=config.training.forward_expansion,
-            seq_len=config.training.up_seq_len,
+            seq_len=config.training.up_seq_len + 3,  # include [SEP] and class1 class2
             dropout_rate=config.training.drop_out,
             num_class1=config.training.num_class_1,
             num_class2=config.training.num_class_2,
@@ -339,7 +359,7 @@ def main(config: DictConfig) -> None:
 
     summary(
         model,
-        input_size=(40, config.training.up_seq_len),
+        input_size=(40, config.training.up_seq_len + 3),
         device=device,
         depth=4,
     )
@@ -356,7 +376,16 @@ def main(config: DictConfig) -> None:
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3
     )  # type: ignore
-    train(model, train_loader, test_loader, criterion_1, criterion_2, optimizer, config)
+    train(
+        model,
+        train_loader,
+        test_loader,
+        criterion_1,
+        criterion_2,
+        optimizer,
+        writer,
+        config,
+    )
     # train_only_first(model, train_loader, test_loader, criterion_1, optimizer, config)
     writer.close()
 
@@ -366,6 +395,6 @@ if __name__ == "__main__":
     torch.set_printoptions(threshold=10_000)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     start_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    writer = SummaryWriter(f"./errorprediction/runs/experiment-{start_time}")
+    # writer = SummaryWriter(f"./errorprediction/runs/experiment-{start_time}")
     print(device, flush=True)
     main()
