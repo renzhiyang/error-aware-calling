@@ -1,27 +1,26 @@
 data_path:
   label_f: /home/yang1031/projects/error-aware-calling/data/illumina/label_tiny_300000
+  tensorboard_f: /home/yang1031/projects/error-aware-calling/errorprediction/runs/name
 
 training:
   model_path: /home/yang1031/projects/error-aware-calling/errorprediction/model_saved
   out_predix: model_1encoder
-  input_length: 99
   data_loader_chunk_size: 1000
   batch_size: 40
   train_ratio: 0.7
   with_embedding: True
   embed_size: 54
-  num_layers: 2
+  num_layers: 4
   heads: 6
   forward_expansion: 1024
   num_tokens: 5
-  num_bases: 5
   num_class_1: 5
   num_class_2: 25
-  dropout_rate: 0.5
   learning_rate: 0.001
-  epochs: 100
-  up_seq_len: 30
+  epochs: 50
+  up_seq_len: 40
   drop_out: 0.1
-  kmer: 3
-  encoder: onehot # kmer, onehot, 
+  kmer: 5
+  encoder: kmer # kmer, onehot,
   model: encoder_transformer # encoder_transformer, lstm, encoder_transformer_noembedding
+
