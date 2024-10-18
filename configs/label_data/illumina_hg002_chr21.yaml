@@ -11,7 +11,7 @@ alignment_filter:
   min_base_quality: 10
 
 label:
-  window_size_half: 100
+  window_size_half: 41
 
 controller:
   phased: FALSE

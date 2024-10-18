@@ -337,7 +337,7 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer(
             embed_size=config.training.embed_size,
             vocab_size=config.training.num_tokens**config.training.kmer
-            + utils.KMER_TOKEN_SHIFT,
+            + config.training.kmer_token_shift,
             with_embedding=config.training.with_embedding,
             num_layers=config.training.num_layers,
             forward_expansion=config.training.forward_expansion,
@@ -359,7 +359,7 @@ def main(config: DictConfig) -> None:
 
     summary(
         model,
-        input_size=(40, config.training.up_seq_len + 3),
+        input_size=(config.training.batch_size, config.training.up_seq_len + 3),
         device=device,
         depth=4,
     )

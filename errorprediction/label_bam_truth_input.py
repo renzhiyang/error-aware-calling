@@ -2,7 +2,8 @@ import os
 import pysam
 import hydra
 import gzip
-import utils
+
+import errorprediction.utils as utils
 
 from omegaconf import DictConfig, OmegaConf
 from typing import List, Dict

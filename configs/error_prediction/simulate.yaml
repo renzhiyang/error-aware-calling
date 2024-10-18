@@ -13,13 +13,14 @@ training:
   num_layers: 4
   heads: 6
   forward_expansion: 1024
-  num_tokens: 5
+  num_tokens: 6
   num_class_1: 5
   num_class_2: 25
   learning_rate: 0.001
   epochs: 50
   up_seq_len: 40
   drop_out: 0.1
+  kmer_token_shift: 30
   kmer: 5
   encoder: kmer # kmer, onehot,
   model: encoder_transformer # encoder_transformer, lstm, encoder_transformer_noembedding

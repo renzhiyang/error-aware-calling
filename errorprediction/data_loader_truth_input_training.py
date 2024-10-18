@@ -2,7 +2,9 @@
 # output: one-hot encoding for each class
 
 import os
+import mmap
 import numpy as np
+from numpy.core.multiarray import array
 
 import errorprediction.utils as utils
 
@@ -21,19 +23,38 @@ class Data_Loader:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"The file {file_path} does not exist")
 
-        with open(file_path, "r") as file:
+        self.__count_lines_and_offsets()
+        # with open(file_path, "r") as file:
+        #   offset = 0
+        #   for line in file:
+        #       if self.total_lines % self.chunk_size == 0:
+        #           self.line_offsets.append(offset)
+        #       offset += len(line)
+        #       self.total_lines += 1
+        # print(self.total_lines)
+
+    def __count_lines_and_offsets(self):
+        with open(self.file_path, "r") as file:
+            mmapped_file = mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
             offset = 0
-            for line in file:
-                if self.total_lines % self.chunk_size == 0:
-                    self.line_offsets.append(offset)
+            self.line_offsets.append(offset)
+
+            while True:
+                line = mmapped_file.readline()
+                if not line:
+                    break
                 offset += len(line)
                 self.total_lines += 1
-        print(self.total_lines)
+                if self.total_lines % self.chunk_size == 0:
+                    self.line_offsets.append(offset)
+            mmapped_file.close()
+        print(f"Total lines in the file: {self.total_lines}")
+        # print(f"offsets: {self.line_offsets}")
 
     def __len__(self):
         return self.total_lines
 
-    def load_line(self, line):
+    def __load_line(self, line):
         """
         Parse a line of data and return a dictionary containing the parsed values.
         """
@@ -49,7 +70,7 @@ class Data_Loader:
         data_dict["seq_around"] = parts[-1].split(":")[1]
         return data_dict
 
-    def input_tokenization(self, input_seq: str):
+    def __input_tokenization(self, input_seq: str):
         """
         Encode input sequence
         """
@@ -64,7 +85,7 @@ class Data_Loader:
         # print(f'input no ont-hot: {array.shape}')
         return array
 
-    def input_tokenization_onehot(self, input_seq: str):
+    def __input_tokenization_onehot(self, input_seq: str):
         """
         Encode input sequence
         """
@@ -86,47 +107,7 @@ class Data_Loader:
         # print(f'one-hot array shape: {one_hot_array.shape}')
         return one_hot_array
 
-    def input_tokenization_kmer(self, input_seq: str, k=3):
-        """
-        Encode input sequence with k-mer
-        """
-        len_seq = len(input_seq)
-        # len_vocab = len(VOCAB_KMER) # for real case
-        len_vocab = len(utils.VOCAB_KMER_SIMULATE)  # for simulate data
-
-        # Initialize an empty list to store k-mer encoding
-        kmer_encodings = []
-
-        # Check if the sequence length is at least the k-mer length
-        if len_seq < k:
-            return None
-
-        # Iterate through the sequence to extract k-mers
-        for i in range(len_seq - k + 1):
-            kmer = input_seq[i : i + k]
-
-            # Convert k-mer into numerical encoding based on VOCAB
-            kmer_value = 0
-            for j, char in enumerate(kmer):
-                # if char not in VOCAB_KMER: # for real data
-                if char not in utils.VOCAB_KMER_SIMULATE:  # for simulate data
-                    return None  # Handle unkwon characters
-
-                # Calculate the unique value for the k-mer
-                kmer_value += utils.VOCAB_KMER_SIMULATE[char] * (
-                    len_vocab ** (k - j - 1)
-                )  # for simulate data
-                # kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))  # for real data
-
-            # Append the encoded k-mer value to the list
-            # kmer_encodings.append(kmer_value)
-            kmer_encodings.append(kmer_value + utils.KMER_TOKEN_SHIFT)
-
-        # Convert the list to a numpy array for efficient processing
-        #kmer_encodings = np.array(kmer_encodings, dtype=np.float32)
-        return kmer_encodings
-
-    def label_tokenization(self, label_1: str, label_2: str):
+    def __label_tokenization(self, label_1: str, label_2: str):
         """
         Map Input nucleotide label to array
 
@@ -152,7 +133,7 @@ class Data_Loader:
 
         return label_array_1, label_array_2
 
-    def load_snv(self, data_dict):
+    def __load_snv(self, data_dict):
         up_seq = data_dict["seq_around"][:-1]
         label_1 = data_dict["read_base"]
         label_2 = "N"
@@ -162,20 +143,20 @@ class Data_Loader:
         if label_1 == "N":
             label_1 = "-"
 
-        label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
+        label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
         if self.config.training.encoder == "onehot":
-            input_array = self.input_tokenization_onehot(
+            input_array = self.__input_tokenization_onehot(
                 up_seq
             )  # with one hot encoding
         elif self.config.training.encoder == "kmer":
-            input_array = self.input_tokenization_kmer(
+            input_array = utils.input_tokenization_kmer(
                 up_seq, k=self.config.training.kmer
             )  # with k-mer encoding
         else:
-            input_array = self.input_tokenization(up_seq)  # without any encoding
+            input_array = self.__input_tokenization(up_seq)  # without any encoding
         return [(input_array, label_array_1, label_array_2)]
 
-    def load_insertion(self, data_dict):
+    def __load_insertion(self, data_dict):
         up_seq = data_dict["seq_around"][:-1]
         type, read_strand = data_dict["type"], data_dict["read_strand"]
 
@@ -196,19 +177,19 @@ class Data_Loader:
             label_2 = "rep" + str(len(label_2))
 
         if self.config.training.encoder == "onehot":
-            input_array = self.input_tokenization_onehot(
+            input_array = self.__input_tokenization_onehot(
                 up_seq
             )  # with one hot encoding
         elif self.config.training.encoder == "kmer":
-            input_array = self.input_tokenization_kmer(
+            input_array = utils.input_tokenization_kmer(
                 up_seq, k=self.config.training.kmer
             )  # with k-mer encoding
         else:
-            input_array = self.input_tokenization(up_seq)  # without any encoding
-        label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
+            input_array = self.__input_tokenization(up_seq)  # without any encoding
+        label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
         return [(input_array, label_array_1, label_array_2)]
 
-    def load_deletion(self, data_dict):
+    def __load_deletion(self, data_dict):
         deletion_samples = []
         type, read_strand, read_base = (
             data_dict["type"],
@@ -227,39 +208,95 @@ class Data_Loader:
             label_1 = read_base[i]
             label_2 = "N"
             if self.config.training.encoder == "onehot":
-                input_array = self.input_tokenization_onehot(
+                input_array = self.__input_tokenization_onehot(
                     up_seq
                 )  # with one hot encoding
             elif self.config.training.encoder == "kmer":
-                input_array = self.input_tokenization_kmer(
+                input_array = utils.input_tokenization_kmer(
                     up_seq, k=self.config.training.kmer
                 )  # with k-mer encoding
             else:
-                input_array = self.input_tokenization(up_seq)  # without any encoding
-            label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
+                input_array = self.__input_tokenization(up_seq)  # without any encoding
+            label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
             deletion_samples.append((input_array, label_array_1, label_array_2))
         return deletion_samples
 
-    def load_with_kmer_groudtruth(self, data_dict):
+    def __load_with_kmer_groudTruth_snv(self, data_dict):
         up_seq = data_dict["seq_around"][:-1]
         label_1 = data_dict["read_base"]
-        label_2 = "N"
+        label_2 = "-"
 
         if data_dict["read_strand"] == "reverse":
             label_1 = utils.reverse_complement(label_1)
         if label_1 == "N":
             label_1 = "-"
+
+        input_array = utils.input_tokenization_include_ground_truth_kmer(
+            up_seq, label_1, label_2, self.config.training.kmer
+        )
+        label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
+        if input_array is None:
+            return None
+
+        return [(input_array, label_array_1, label_array_2)]
+
+    def __load_with_kmer_groundTruth_insertion(self, data_dict):
+        # Include 'grountTruth(next_base, next_insertion)' to input sequence
+        #
+        up_seq = data_dict["seq_around"][:-1]
+        type, read_strand = data_dict["type"], data_dict["read_strand"]
+
+        label_1 = data_dict["read_base"][0]
+        label_2 = data_dict["read_base"][1:]
+
+        if len(label_2) > 1:
+            label_2 = label_2.replace("N", "")
+        if read_strand == "reverse":
+            label_1 = data_dict["seq_around"][-1]
+            label_1 = utils.reverse_complement(label_1)
+
+        # exclude smaples with insertion length larger than 6
+        if len(label_2) >= 3 and len(label_2) <= 6:
+            label_2 = "rep" + str(len(label_2))
+        else:
+            return None
+
         if label_2 == "N":
             label_2 = "-"
 
-        label_array_1, label_array_2 = self.label_tokenization(label_1, label_2)
+        input_array = utils.input_tokenization_include_ground_truth_kmer(
+            up_seq, label_1, label_2, self.config.training.kmer
+        )
+        label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
+        if input_array is None:
+            return None
 
-        input_array = []
-        input_array = self.input_tokenization_kmer(up_seq, self.config.training.kmer)
-        input_array.append(utils.TOKENS.index("SEP"))  # add seperate token
-        input_array.append(utils.TOKENS.index(label_1))  # add ground truth
-        input_array.append(utils.TOKENS.index(label_2))
         return [(input_array, label_array_1, label_array_2)]
+
+    def __load_with_kmer_groundTruth_deletion(self, data_dict):
+        deletion_sampels = []
+        read_strand, read_base = data_dict["read_strand"], data_dict["read_base"]
+        seq_around = data_dict["seq_around"][1:]
+        read_base = read_base[:-1]
+
+        if read_strand == "reverse":
+            read_base = utils.reverse_complement(read_base)
+        # exclude deletion length larger than window size
+        if len(data_dict["read_base"]) - 2 >= self.config.training.up_seq_len:
+            return None
+
+        num_samples = len(read_base)
+        for i in range(num_samples):
+            up_seq = seq_around[i:] + "-" * i
+            label_1 = read_base[i]
+            label_2 = "-"
+            input_array = utils.input_tokenization_include_ground_truth_kmer(
+                up_seq, label_1, label_2, self.config.training.kmer
+            )
+            label_array_1, label_array_2 = self.__label_tokenization(label_1, label_2)
+            if input_array is not None:
+                deletion_sampels.append((input_array, label_array_1, label_array_2))
+        return deletion_sampels
 
     def __getitem__(self, idx):
         chunk_idx = idx // self.chunk_size
@@ -272,7 +309,7 @@ class Data_Loader:
 
             # load each line
             line = file.readline()
-            data_dict = self.load_line(line)
+            data_dict = self.__load_line(line)
 
             # skip insertion length > 6
             if (
@@ -284,19 +321,29 @@ class Data_Loader:
                 data_dict["variant_type"] in ["SNV", "Insertion", "Deletion"]
                 and len(data_dict["seq_around"]) != self.config.training.up_seq_len + 1
             ):
+                print("skip")
                 return None
 
             # include [SEP] and lebels to inputs
-            input_label_array = self.load_with_kmer_groudtruth(data_dict)
+            if data_dict["variant_type"] == "SNV":
+                input_label_array = self.__load_with_kmer_groudTruth_snv(data_dict)
+            elif data_dict["variant_type"] == "Insertion":
+                input_label_array = self.__load_with_kmer_groundTruth_insertion(
+                    data_dict
+                )
+            elif data_dict["variant_type"] == "Deletion":
+                input_label_array = self.__load_with_kmer_groundTruth_deletion(
+                    data_dict
+                )
 
             # for details, see https://kalab.docbase.io/posts/3374958
             # if data_dict["variant_type"] == "SNV":
-            #    input_label_array = self.load_snv(data_dict)
+            #    input_label_array = __self.load_snv(data_dict)
 
             # elif data_dict["variant_type"] == "Insertion":
-            #    input_label_array = self.load_insertion(data_dict)
+            #    input_label_array = __self.load_insertion(data_dict)
 
             # elif data_dict["variant_type"] == "Deletion":
-            #    input_label_array = self.load_deletion(data_dict)
+            #    input_label_array = __self.load_deletion(data_dict)
 
             return input_label_array
