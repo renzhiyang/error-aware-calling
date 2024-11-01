@@ -321,7 +321,10 @@ class Data_Loader:
                 data_dict["variant_type"] in ["SNV", "Insertion", "Deletion"]
                 and len(data_dict["seq_around"]) != self.config.training.up_seq_len + 1
             ):
-                print("skip")
+                around = "seq_around"
+                print(
+                    f"skip, seq_around len:{len(data_dict[around])} up_len:{self.config.training.up_seq_len + 1}"
+                )
                 return None
 
             # include [SEP] and lebels to inputs

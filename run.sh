@@ -8,9 +8,11 @@ usage() {
   echo '  -r, --ref_fn=FILE            Reference file input.'
   echo '  -o, --output_prefix=FILE     Output file prefix.'
   echo '  -t, --slots=INT              Number of slots to use.'
+  echo '  -m, --model=FILE             Model file input.'
   echo ''
   echo 'Optional parameters:'
   echo '  --bed_fn=FILE                The regions that will be processed.'
+  echo '  --config_f=FILE              The configuration file.'
   echo '  --chunck_size=INT            The chunk size for parallel processing.'
   echo '  --samtools=STR               Path to samtools.'
   exit 1
@@ -49,6 +51,14 @@ while [[ "$#" -gt 0 ]]; do
     SLOTS="$2"
     shift
     ;;
+  -m | --model)
+    MODEL="$2"
+    shift
+    ;;
+  --config_f)
+    CONFIG_FILE="$2"
+    shift
+    ;;
   --bed_fn)
     BED_FILE="$2"
     shift
@@ -83,7 +93,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check if required parameters are provided
-if [ -z "$BAM_FILE" ] || [ -z "$REF_FILE" ] || [ -z "$OUTPUT_PREFIX" ] || [ -z "$SLOTS" ]; then
+if [ -z "$MODEL" ] || [ -z "$BAM_FILE" ] || [ -z "$REF_FILE" ] || [ -z "$OUTPUT_PREFIX" ] || [ -z "$SLOTS" ]; then
   echo "Error: Missing required parameters."
   usage
 fi
@@ -103,6 +113,7 @@ done
 
 ############### Confirm the inputs
 echo "Input Parameters:"
+echo "Model File: $MODEL"
 echo "BAM File: $BAM_FILE"
 echo "Reference File: $REF_FILE"
 echo "Output Prefix: $OUTPUT_PREFIX"
@@ -125,15 +136,17 @@ fi
 # create intermediate directory
 CANDIDATES_PREFIX="$OUTPUT_PREFIX/candidates"
 TENSOR_PREFIX="$OUTPUT_PREFIX/tensor"
+VCF_PREFIX="$OUTPUT_PREFIX/vcf"
 mkdir -p "$CANDIDATES_PREFIX"
 mkdir -p "$TENSOR_PREFIX"
+mkdir -p "$VCF_PREFIX"
 
 ############### FIRST STEP: Find candidates and generate tensor file
 find_candidates_generate_tensors() {
   local ctg_name=$1
   local ctg_start=$2
   local ctg_end=$3
-  #echo "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
+  # echo "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   python ./src/find_candidates.py \
     --bam_fn "$BAM_FILE" \
     --ref_fn "$REF_FILE" \
@@ -148,6 +161,7 @@ find_candidates_generate_tensors() {
   if [ ! -s "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates" ]; then
     rm "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   else
+    echo "genrate tensor at $ctg_name:$ctg_start-$ctg_end"
     python -m src.generate_tensor \
       --ref_fn "$REF_FILE" \
       --bam_fn "$BAM_FILE" \
@@ -158,7 +172,7 @@ find_candidates_generate_tensors() {
 
 export -f find_candidates_generate_tensors
 export PARALLEL="--jobs $SLOTS"
-export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX
+export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX VCF_PREFIX
 
 # Function to combine candidate files for each chromosome
 combine_candidates() {
@@ -173,6 +187,7 @@ export -f combine_candidates
 chunk_file="$OUTPUT_PREFIX/chunks.txt"
 touch "$chunk_file"
 
+# generate chunk file, each line is a region to process
 if [ -n "$BED_FILE" ]; then
   # Process regions from BED file
   awk -v chunk_size="$CHUNK_SIZE" '{
@@ -194,9 +209,25 @@ else
 fi
 
 # Process chunks using GNU parallel with limited threads
-cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates_generate_tensors
+# cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates_generate_tensors
 
 # delete candidate files
 # rm "$CANDIDATES_PREFIX"/*.candidates
 
 ############### Step2: Predicting ###############
+predict() {
+  local tensor_f=$1
+  vcf_filename="${tensor_f##*/}"
+  vcf_name="${vcf_filename%.tensor}"
+  python predict.py \
+    --model "$MODEL" \
+    --tensor_fn $tensor_f \
+    --output_fn "$VCF_PREFIX/$vcf_name.vcf" \
+    --config_f "$CONFIG_FILE"
+}
+
+export MODEL CONFIG_FILE
+export -f predict
+
+# process tensor files using GNU parallel with limited threads
+find "$TENSOR_PREFIX" -name "*.tensor" | parallel --jobs "$SLOTS" predict
