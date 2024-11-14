@@ -236,8 +236,9 @@ def predict_kmer(args):
 
             position = int(id.split("_")[1])
 
-            if position != 29855876:
-                continue
+            # if position != 29855876:
+            #  position != 29948200:
+            #     continue
 
             if cur_pos != position:
                 if cur_pos != 0:
@@ -274,10 +275,10 @@ def predict_kmer(args):
 
             # print test
             max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
-            print(
-                f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
-                flush=True,
-            )
+            #print(
+            #    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
+            #    flush=True,
+            #)
 
             all_genotype_pos_probs_one_read = (
                 caller.all_genotypes_posterior_prob_per_read_log(
@@ -301,7 +302,7 @@ def predict_kmer(args):
                 )
                 # print(f"position: {cur_pos}, probs: {cur_probs}")
 
-    print_genotype(cur_pos, cur_probs, out_fn)
+    #print_genotype(cur_pos, cur_probs, out_fn)
 
 
 def main():
