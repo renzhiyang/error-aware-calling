@@ -8,7 +8,7 @@ class BayesianCaller:
     """
 
     def __init__(self):
-        self.mini_prob = 1e-4
+        self.mini_prob = 1e-10
         self.alleles = utils.ALLELES()
         self.base_prior_prob_dic = {}
         self.insertion_prior_prob_dic = {}

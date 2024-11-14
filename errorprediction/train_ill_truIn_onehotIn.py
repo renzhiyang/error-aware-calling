@@ -41,14 +41,17 @@ def create_data_loader(dataset, batch_size: int, train_ratio: float):
         ...
     ]
     """
-    print(f"original len: {len(dataset)}")
+    print(f"original len: {len(dataset)}", flush=True)
     dataset = [item for item in dataset if item is not None]
     flat_data = [
         sample for sublist in dataset for sample in sublist if sample is not None
     ]
     train_size = int(train_ratio * len(flat_data))
     test_size = len(flat_data) - train_size
-    print(f"flat dataset len: {len(flat_data)}, train: {train_size}, test: {test_size}")
+    print(
+        f"flat dataset len: {len(flat_data)}, train: {train_size}, test: {test_size}",
+        flush=True,
+    )
     train_dataset, test_dataset = random_split(flat_data, [train_size, test_size])  # type: ignore
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custon_collate_fn
@@ -89,57 +92,61 @@ def train(
     criterion_2,
     optimizer,
     writer,
+    epoch,
+    cur_file_index,
+    count_file,
     config,
 ):
-    save_interval = 10
-    epochs = config.training.epochs
+    save_interval = 5
+    # epochs = config.training.epochs
     model_dir = config.training.model_path + "/" + start_time
     ensure_dir(model_dir)
 
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0
+    # for epoch in range(epochs):
+    model.train()
+    running_loss = 0
 
-        for i, (inputs, labels_1, labels_2) in enumerate(train_loader):
-            optimizer.zero_grad()
-            inputs, labels_1, labels_2 = (
-                inputs.to(device),
-                labels_1.to(device),
-                labels_2.to(device),
-            )
-            # print(f'num: {i+1}, input shape:{inputs.shape}')
-            # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
-            next_base, insertion = model(inputs)
-            # print(f"training next_base: {next_base}, training label: {labels_1}")
-            # print(f"training insertion: {insertion}, training label: {labels_2}")
-
-            loss_1 = criterion_1(next_base, labels_1)
-            loss_2 = criterion_2(insertion, labels_2)
-            loss = loss_1 + loss_2
-            loss.backward()
-            optimizer.step()
-            running_loss += loss_1.item() + loss_2.item()
-
-        epoch_loss = running_loss / len(train_loader)
-        writer.add_scalar("Loss/train", epoch_loss, epoch)
-
-        val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2, config)
-        writer.add_scalar("Loss/test", val_loss, epoch)
-        writer.add_scalar("Accuracy/test", accuracy, epoch)
-        log_weights(epoch, writer, model)
-        writer.flush()
-        print(
-            f"Time:{datetime.now()}, Epoch {epoch+1}/{epochs}, Loss_train: {epoch_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f} \n",
-            flush=True,
+    for i, (inputs, labels_1, labels_2) in enumerate(train_loader):
+        optimizer.zero_grad()
+        inputs, labels_1, labels_2 = (
+            inputs.to(device),
+            labels_1.to(device),
+            labels_2.to(device),
         )
+        # print(f'num: {i+1}, input shape:{inputs.shape}')
+        # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
+        next_base, insertion = model(inputs)
+        # print(f"training next_base: {next_base}, training label: {labels_1}")
+        # print(f"training insertion: {insertion}, training label: {labels_2}")
 
-        if (epoch + 1) % save_interval == 0:
-            model_save_path = os.path.join(
-                model_dir, f"{config.training.out_predix}_epoch_{epoch+1}.pt"
-            )
-            torch.save(model.state_dict(), model_save_path)
-            # model.load_state_dict(torch.load(model_save_path, map_location=device))
-            print(f"Model saved at epoch {epoch+1} \n", flush=True)
+        loss_1 = criterion_1(next_base, labels_1)
+        loss_2 = criterion_2(insertion, labels_2)
+        loss = loss_1 + loss_2
+        loss.backward()
+        optimizer.step()
+        running_loss += loss_1.item() + loss_2.item()
+
+    cur_file_loss = running_loss / len(train_loader)
+    writer.add_scalar("Loss/train by file_index", cur_file_loss, count_file)
+
+    val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2, config)
+    writer.add_scalar("Loss/test by file_index", val_loss, count_file)
+    writer.add_scalar("Accuracy/test by file_index", accuracy, count_file)
+    # log_weights(epoch, writer, model)
+    writer.flush()
+    print(
+        f"Time:{datetime.now()}, Epoch {epoch} file {cur_file_index}, Loss_train: {cur_file_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f} \n",
+        flush=True,
+    )
+
+    if (count_file) % save_interval == 0:
+        model_save_path = os.path.join(
+            model_dir,
+            f"{config.training.out_predix}_epoch-{epoch}_file-{cur_file_index}.pt",
+        )
+        torch.save(model.state_dict(), model_save_path)
+        # model.load_state_dict(torch.load(model_save_path, map_location=device))
+        print(f"Model saved at epoch {epoch}, the {cur_file_index} file \n", flush=True)
 
 
 def test(model, test_loader, criterion_1, criterion_2, config):
@@ -193,9 +200,10 @@ def test(model, test_loader, criterion_1, criterion_2, config):
                 ):
                     correct += 1
     print(
-        f"# of correct next base: {next_base_correct}, # of correct insertion: {insertion_correct}"
+        f"# of correct next base: {next_base_correct}, # of correct insertion: {insertion_correct}",
+        flush=True,
     )
-    print(f"# of corrent next base & insertion: {correct}, total: {total}")
+    print(f"# of corrent next base & insertion: {correct}, total: {total}", flush=True)
     val_loss = running_loss / len(test_loader)
     accuracy = 100 * correct / total
     return val_loss, accuracy
@@ -307,28 +315,17 @@ def main(config: DictConfig) -> None:
 
     # tensorboard
     writer = SummaryWriter(config.data_path.tensorboard_f)
-    dataset = Data_Loader(
-        file_path=config.data_path.label_f,
-        config=config,
-        chunk_size=config.training.data_loader_chunk_size,
-    )
-    train_loader, test_loader = create_data_loader(
-        dataset,
-        batch_size=config.training.batch_size,
-        train_ratio=config.training.train_ratio,
-    )
 
     # update up_seq_len if the input encoder is kmer encoder
+    UP_SEQ_LEN = config.training.up_seq_len
     if config.training.encoder == "kmer":
-        config.training.up_seq_len = (
-            config.training.up_seq_len - config.training.kmer + 1
-        )
+        UP_SEQ_LEN = config.training.up_seq_len - config.training.kmer + 1
 
     # model = Baseline().to(device)
     # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
     if config.training.model == "lstm":
         model = nets.LSTM_simple(
-            seq_len=config.training.up_seq_len,
+            seq_len=UP_SEQ_LEN,
             num_layers=config.training.num_layers,
             num_class1=config.training.num_class_1,
             num_class2=config.training.num_class_2,
@@ -337,11 +334,13 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer(
             embed_size=config.training.embed_size,
             vocab_size=config.training.num_tokens**config.training.kmer
-            + utils.KMER_TOKEN_SHIFT,
+            + config.training.kmer_token_shift,
             with_embedding=config.training.with_embedding,
             num_layers=config.training.num_layers,
             forward_expansion=config.training.forward_expansion,
-            seq_len=config.training.up_seq_len + 3,  # include [SEP] and class1 class2
+            seq_len=UP_SEQ_LEN + 3,  # include [SEP] and class1 class2
+            # seq_len=UP_SEQ_LEN, # exclude next_base and next_insertion
+            # seq_len=UP_SEQ_LEN + 2,  # include class1 class2
             dropout_rate=config.training.drop_out,
             num_class1=config.training.num_class_1,
             num_class2=config.training.num_class_2,
@@ -350,7 +349,7 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer_NoEmbedding(
             heads=config.training.heads,
             num_layers=config.training.num_layers,
-            seq_len=config.training.up_seq_len,
+            seq_len=UP_SEQ_LEN, 
             dropout_rate=config.training.drop_out,
             forward_expansion=config.training.forward_expansion,
             num_class1=config.training.num_class_1,
@@ -359,34 +358,61 @@ def main(config: DictConfig) -> None:
 
     summary(
         model,
-        input_size=(40, config.training.up_seq_len + 3),
+        input_size=(config.training.batch_size, UP_SEQ_LEN + 3),
         device=device,
         depth=4,
     )
 
-    # tensorboard visualize model
-    # dummy_input = torch.rand(config.training.batch_size, config.training.up_seq_len).to(
-    #    device
-    # )
-    # writer.add_graph(model, dummy_input)
-
     criterion_1 = nn.CrossEntropyLoss()
     criterion_2 = nn.CrossEntropyLoss()
-    # optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3)
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3
-    )  # type: ignore
-    train(
-        model,
-        train_loader,
-        test_loader,
-        criterion_1,
-        criterion_2,
-        optimizer,
-        writer,
-        config,
-    )
-    # train_only_first(model, train_loader, test_loader, criterion_1, optimizer, config)
+
+    # load data from data_folder and training
+    epochs = config.training.epochs
+    count_file = 0
+    cur_file_index = 0
+    for epoch in range(1, epochs + 1):
+        print(f"Epoch: {epoch}", flush=True)
+        for root, dirs, files in os.walk(config.data_path.label_f):
+            for file in files:
+                cur_file_index += 1
+                count_file += 1
+                print(
+                    f"Training on the file {cur_file_index} of epoch {epoch}",
+                    flush=True,
+                )
+
+                label_f = os.path.join(root, file)
+                dataset = Data_Loader(
+                    file_path=label_f,
+                    config=config,
+                    chunk_size=config.training.data_loader_chunk_size,
+                )
+                train_loader, test_loader = create_data_loader(
+                    dataset,
+                    batch_size=config.training.batch_size,
+                    train_ratio=config.training.train_ratio,
+                )
+                # optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3)
+                optimizer = torch.optim.Adam(
+                    model.parameters(),
+                    lr=config.training.learning_rate,
+                    weight_decay=1e-3,
+                )  # type: ignore
+                train(
+                    model,
+                    train_loader,
+                    test_loader,
+                    criterion_1,
+                    criterion_2,
+                    optimizer,
+                    writer,
+                    epoch,
+                    cur_file_index,
+                    count_file,
+                    config,
+                )
+                # train_only_first(model, train_loader, test_loader, criterion_1, optimizer, config)
+        cur_file_index = 0
     writer.close()
 
 

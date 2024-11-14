@@ -2,9 +2,9 @@ import numpy as np
 
 VOCAB = {"A": 1, "C": 2, "G": 3, "T": 4, "-": 5, "N": 6}
 VOCAB_KMER = {"N": 0, "A": 1, "C": 2, "G": 3, "T": 4, "-": 5}
-CLASSES_PROB_1 = ["A", "C", "G", "T", "-"]
+CLASSES_PROB_1 = ["-", "A", "C", "G", "T"]
 CLASSES_PROB_2 = [
-    "N",
+    "-",
     "A",
     "C",
     "G",

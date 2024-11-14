@@ -9,6 +9,7 @@ class Simulater:
         bam_file: str,
         out_file: str,
         samtools: str,
+        min_mapping_q: str,
         ctg_name: str,
         ctg_start: int,
         ctg_end: int,
@@ -20,6 +21,7 @@ class Simulater:
         self.bam_file = bam_file
         self.out_file = out_file
         self.samtools = samtools
+        self.min_mapping_q = min_mapping_q
         self.up_len = up_len
         self.real_num = int(num_samples * (1 - random_ratio))
         self.random_num = num_samples - self.real_num
@@ -39,7 +41,7 @@ class Simulater:
             self.ctg_start,
             self.ctg_end,
             self.bam_file,
-            20,
+            self.min_mapping_q,
             self.samtools,
         )
         reads = subprocess.stdout
@@ -132,6 +134,7 @@ def generate_simulate_data(args):
         args.bam_fn,
         args.out_fn,
         args.samtools,
+        args.min_mapping_q,
         args.ctg_name,
         args.ctg_start,
         args.ctg_end,
@@ -167,6 +170,9 @@ def main():
     )
     parser.add_argument(
         "--num_samples", type=int, default=100, help="number of simulated samples"
+    )
+    parser.add_argument(
+        "--min_mapping_q", type=int, default=20, help="minimum mapping quality"
     )
     parser.add_argument(
         "--is_padding_N",

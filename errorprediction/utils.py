@@ -120,9 +120,11 @@ def print_label(
 def samtools_view_from(ctg_name, ctg_start, ctg_end, bam_fn, min_mq, samtools):
     """
     Get reads record by 'samtools view'
-    Here region is from candidate_position to candidate_position + 1
     """
-    region = "%s:%d-%d" % (ctg_name, ctg_start, ctg_end)
+    region = ""
+    if ctg_name:
+        region = "%s:%d-%d" % (ctg_name, ctg_start, ctg_end)
+
     subprocess = Popen(
         shlex.split(f"{samtools} view -q {min_mq} {bam_fn} {region}"), stdout=PIPE
     )
@@ -153,3 +155,68 @@ def decode_kmer(kmer_encodings, k=3):
         decoded_seq.append("".join(decoded_kmer))
 
     return "".join([kmer[0] for kmer in decoded_seq[:-1]]) + decoded_seq[-1]
+
+
+def input_tokenization_kmer(input_seq: str, k=3):
+    """
+    Encode input sequence with k-mer
+    """
+    len_seq = len(input_seq)
+    len_vocab = len(VOCAB_KMER)  # for real case
+    # len_vocab = len(utils.VOCAB_KMER_SIMULATE)  # for simulate data
+
+    # Initialize an empty list to store k-mer encoding
+    kmer_encodings = []
+
+    # Check if the sequence length is at least the k-mer length
+    if len_seq < k:
+        return None
+
+    # Iterate through the sequence to extract k-mers
+    for i in range(len_seq - k + 1):
+        kmer = input_seq[i : i + k]
+
+        # Convert k-mer into numerical encoding based on VOCAB
+        kmer_value = 0
+        for j, char in enumerate(kmer):
+            if char not in VOCAB_KMER:  # for real data
+                # if char not in utils.VOCAB_KMER_SIMULATE:  # for simulate data
+                return None  # Handle unkwon characters
+
+            # Calculate the unique value for the k-mer
+            # kmer_value += utils.VOCAB_KMER_SIMULATE[char] * (
+            #    len_vocab ** (k - j - 1)
+            # )  # for simulate data
+            kmer_value += VOCAB_KMER[char] * (len_vocab ** (k - j - 1))  # for real data
+
+        # Append the encoded k-mer value to the list
+        # kmer_encodings.append(kmer_value)
+        kmer_encodings.append(kmer_value + KMER_TOKEN_SHIFT)
+
+    # Convert the list to a numpy array for efficient processing
+    # kmer_encodings = np.array(kmer_encodings, dtype=np.float32)
+    return kmer_encodings
+
+
+def input_tokenization_include_ground_truth_kmer(
+    up_seq: str, next_base: str, insertion: str, kmer: int
+):
+    input_array = []
+    input_array = input_tokenization_kmer(up_seq, kmer)
+
+    if input_array is None:
+        return None
+    input_array.append(TOKENS.index("SEP"))
+    input_array.append(TOKENS.index(next_base))
+    input_array.append(TOKENS.index(insertion))
+    return input_array
+
+def input_tokenization_without_grount_truth_kmer(
+    up_seq:str, kmer:int
+):
+    input_array = []
+    input_array = input_tokenization_kmer(up_seq, kmer)
+    
+    if input_array is None:
+        return None
+    return input_array

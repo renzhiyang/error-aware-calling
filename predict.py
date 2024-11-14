@@ -1,15 +1,16 @@
 #! /usr/bin/env python3
-
 import os
+from regex import W
+import yaml
 import torch
 import argparse
-
-import src.bayesian as bayesian
-import errorprediction.models.nets as nets
-import src.utils as utils
 import numpy as np
 
-from errorprediction.models.baseline import Baseline
+import src.utils as utils
+import src.bayesian as bayesian
+import errorprediction.models.nets as nets
+import errorprediction.utils as model_utils
+
 from torch.utils.data import DataLoader
 
 
@@ -47,15 +48,39 @@ class TensorData:
             position = int(id.split("_")[1])
             index = int(id.split("_")[2])
 
-            tensor_kmer = utils.kmer_seq(input_seq, k=3)
-            return position, index, tensor_kmer, observe_b, observe_ins
+            # tensor_kmer = utils.kmer_seq(input_seq, k=3)
+            return position, index, input_seq, observe_b, observe_ins
+
+
+def load_model_paras(config_f: str):
+    # input is model parameters' config yaml file
+    if not os.path.exists(config_f):
+        print("config file path not exists")
+
+    config = open(config_f, "r")
+    config = yaml.safe_load(config)
+    params = config["training"]
+    return params
 
 
 def normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    min_val = tensor.min()
-    max_val = tensor.max()
-    normalized_tensor = (tensor - min_val) / (max_val - min_val)
+    # resize all probs to (0,1), and sum to 1
+    # min_val = tensor.min()
+    # max_val = tensor.max()
+    # normalized_tensor = (tensor - min_val) / (max_val - min_val)
+    # return normalized_tensor / normalized_tensor.sum()
+    shift_tensor = tensor - tensor.min() + 1  # +1 to avoid 0 probs
+    normalized_tensor = shift_tensor / shift_tensor.sum()
     return normalized_tensor
+
+
+def reverse_prob_distributions(next_base_dis, insertion_dis):
+    # change the order of A,C,G,T for reverse strand
+    next_base_dis[1], next_base_dis[-1] = next_base_dis[-1], next_base_dis[1]
+    next_base_dis[2], next_base_dis[3] = next_base_dis[3], next_base_dis[2]
+    # TODO change the order of insertion distribution
+
+    return next_base_dis, insertion_dis
 
 
 def predict(args):
@@ -95,13 +120,6 @@ def predict(args):
     pos_probs_in_pos = {}  # key:position, value: all reads' posterior probs dict
     # count = 0
     for position, idx, tensor_one_hot, observe_b, observe_ins in dataloader:
-        # test codes
-        # count += 1
-        # if count >= 1000:
-        # break
-        # if position != 7232171:
-        #    continue
-
         tensor_one_hot = tensor_one_hot.float().to(device)
         observe_b = observe_b[0]
         observe_ins = observe_ins[0]
@@ -144,9 +162,21 @@ def predict(args):
         print(f"position: {pos}, most likelily genotype: {next(iter(sorted_probs))}")
 
 
+def print_genotype(cur_pos, cur_probs, out_fn):
+    snv_probs = {k: v for k, v in cur_probs.items() if k.startswith("snv")}
+    ins_probs = {k: v for k, v in cur_probs.items() if k.startswith("insertion")}
+
+    snv_sorted = sorted(snv_probs.items(), key=lambda x: x[1], reverse=True)
+    ins_sorted = sorted(ins_probs.items(), key=lambda x: x[1], reverse=True)
+    outline = f"position: {cur_pos}  snv: {snv_sorted[:5]}  ins: {ins_sorted[:5]} \n"
+    out_fn.write(outline)
+    print(outline, flush=True)
+
+
 def predict_kmer(args):
     model_fn = args.model
     tensor_fn = args.tensor_fn
+    out_fn = args.output_fn
 
     # check file path
     if not os.path.exists(model_fn):
@@ -156,70 +186,122 @@ def predict_kmer(args):
         print(f"Error: Tensor file '{tensor_fn}' does not exist.")
         return
 
+    # new predicted results file of current tensors
+    out_fn = open(out_fn, "w")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tensor_f = open(tensor_fn, "r")
     caller = bayesian.BayesianCaller()
+    params = load_model_paras(args.config_fn)
+
+    # calculate the kmer vocabulary size
+    # [0:kmer_token_shift] values encode class values and [SEP] symbol
+    VOCAB_SIZE = params["num_tokens"] ** params["kmer"] + params["kmer_token_shift"]
 
     print(f"device: {device}")
     # model = Baseline().to(device)
     model = nets.Encoder_Transformer(
-        embed_size=54,
-        vocab_size=216,
-        num_layers=1,
-        forward_expansion=1024,
-        seq_len=97,
-        dropout_rate=0.1,
-        num_class1=5,
-        num_class2=25,
+        embed_size=params["embed_size"],
+        vocab_size=VOCAB_SIZE,
+        num_layers=params["num_layers"],
+        forward_expansion=params["forward_expansion"],
+        seq_len=params["up_seq_len"] - params["kmer"] + 4,  # with [sep] symbol
+        # seq_len=params["up_seq_len"] - params["kmer"] + 3,  # without [sep] symbol
+        dropout_rate=params["drop_out"],
+        num_class1=params["num_class_1"],
+        num_class2=params["num_class_2"],
     ).to(device)
-    model.load_state_dict(torch.load(model_fn, map_location=device))
+    model.load_state_dict(torch.load(model_fn, map_location=device, weights_only=True))
     model.eval()
 
     cur_pos = 0
-    cur_probs = {}
-    for line in tensor_f:
-        line = line.strip().split()
+    cur_probs = []
 
-        id = line[0]
-        input_seq = line[1]
-        observe_b = str(line[2])
-        observe_ins = str(line[3])
+    with torch.no_grad():
+        for line in tensor_f:
+            line = line.strip().split()
 
-        position = int(id.split("_")[1])
-        index = int(id.split("_")[2])
+            ctg_name = line[0]
+            id = line[1]
+            input_seq = line[2]
+            observe_b = str(line[3])
+            observe_ins = str(line[4])
+            read_strand = line[5]
+            observe_ins = "-" if observe_ins == "N" else observe_ins
 
-        if cur_pos != position:
-            if cur_pos != 0:
-                sorted_probs = sorted(
-                    cur_probs.items(), key=lambda x: x[1], reverse=True
+            # TODO for some case, label_2 is like "AN"
+            # should fix this error
+            if "N" in observe_ins:
+                continue
+
+            position = int(id.split("_")[1])
+
+            if position != 29855876:
+                continue
+
+            if cur_pos != position:
+                if cur_pos != 0:
+                    print_genotype(cur_pos, cur_probs, out_fn)
+                cur_pos = position
+                cur_probs = []
+
+            input_tokenization = (
+                model_utils.input_tokenization_include_ground_truth_kmer(
+                    input_seq, observe_b, observe_ins, params["kmer"]
                 )
-                print(
-                    f"position: {cur_pos}, most likelily genotype: {sorted_probs[:5]}"
+            )
+            # tensor_kmer = utils.kmer_seq(input_seq, k=params["kmer"])
+            input_tensor = (
+                torch.tensor(input_tokenization).float().unsqueeze(0).to(device)
+            )
+            next_base_dis, insertion_dis = model(input_tensor)
+            next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
+            insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
+
+            next_base_dis = normalize_tensor(next_base_dis)
+            insertion_base_dis = normalize_tensor(insertion_base_dis)
+
+            # for reverse strand, change the order of prob distributions
+            if read_strand == "reverse":
+                # in the genotype calculate, it should use forward-based nucleotide
+                observe_b = model_utils.reverse_complement(observe_b)
+                # TODO include insertion
+                # observe_ins = model_utils.reverse_complement(observe_ins)
+
+                next_base_dis, insertion_base_dis = reverse_prob_distributions(
+                    next_base_dis, insertion_base_dis
                 )
-            cur_pos = position
-            cur_probs = []
 
-        tensor_kmer = utils.kmer_seq(input_seq, k=3)
-        tensor_kmer = torch.tensor(tensor_kmer).float().unsqueeze(0).to(device)
-        next_base_dis, insertion_dis = model(tensor_kmer)
-        next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
-        insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
-
-        next_base_dis = normalize_tensor(next_base_dis)
-        insertion_base_dis = normalize_tensor(insertion_base_dis)
-
-        all_genotype_pos_probs_one_read = (
-            caller.all_genotypes_posterior_prob_per_read_log(
-                next_base_dis, insertion_base_dis, observe_b, observe_ins
+            # print test
+            max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+            print(
+                f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
+                flush=True,
             )
-        )
 
-        if len(cur_probs) == 0:
-            cur_probs = all_genotype_pos_probs_one_read
-        else:
-            cur_probs = caller.multiply_pos_probs_of_two_reads(
-                cur_probs, all_genotype_pos_probs_one_read
+            all_genotype_pos_probs_one_read = (
+                caller.all_genotypes_posterior_prob_per_read_log(
+                    next_base_dis, insertion_base_dis, observe_b, observe_ins
+                )
             )
+            # print(f"probs: {all_genotype_pos_probs_one_read}")
+            """
+            all_genotype_pos_probs_one_read = (
+                caller.all_genotypes_posterior_prob_per_read_log_uniform_prior(
+                    next_base_dis, insertion_base_dis, observe_b, observe_ins
+                )
+            )
+            print(f'position: {position}, initial probs: {all_genotype_pos_probs_one_read}')
+            """
+            if len(cur_probs) == 0:
+                cur_probs = all_genotype_pos_probs_one_read
+            else:
+                cur_probs = caller.add_pos_probs_of_two_reads(
+                    cur_probs, all_genotype_pos_probs_one_read
+                )
+                # print(f"position: {cur_pos}, probs: {cur_probs}")
+
+    print_genotype(cur_pos, cur_probs, out_fn)
 
 
 def main():
@@ -233,7 +315,21 @@ def main():
         required=True,
     )
     parser.add_argument(
-        "--tensor_fn", type=str, help="tensor file generate by generate_tensor.py"
+        "--tensor_fn",
+        type=str,
+        help="tensor file generate by generate_tensor.py",
+        required=True,
+    )
+    parser.add_argument(
+        "--config_fn",
+        type=str,
+        help="parameters of model, restored in yaml file",
+        required=True,
+    )
+    parser.add_argument(
+        "--output_fn",
+        type=str,
+        help="the output file, finnaly it will be a VCF file",
     )
     args = parser.parse_args()
     # predict(args)
@@ -241,4 +337,5 @@ def main():
 
 
 if __name__ == "__main__":
+    torch.set_num_threads(1)
     main()
