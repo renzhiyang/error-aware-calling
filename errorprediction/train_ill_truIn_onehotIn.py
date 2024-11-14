@@ -94,9 +94,10 @@ def train(
     writer,
     epoch,
     cur_file_index,
+    count_file,
     config,
 ):
-    save_interval = 15
+    save_interval = 5
     # epochs = config.training.epochs
     model_dir = config.training.model_path + "/" + start_time
     ensure_dir(model_dir)
@@ -126,11 +127,11 @@ def train(
         running_loss += loss_1.item() + loss_2.item()
 
     cur_file_loss = running_loss / len(train_loader)
-    writer.add_scalar("Loss/train by file_index", cur_file_loss, cur_file_index)
+    writer.add_scalar("Loss/train by file_index", cur_file_loss, count_file)
 
     val_loss, accuracy = test(model, test_loader, criterion_1, criterion_2, config)
-    writer.add_scalar("Loss/test by file_index", val_loss, cur_file_index)
-    writer.add_scalar("Accuracy/test by file_index", accuracy, cur_file_index)
+    writer.add_scalar("Loss/test by file_index", val_loss, count_file)
+    writer.add_scalar("Accuracy/test by file_index", accuracy, count_file)
     # log_weights(epoch, writer, model)
     writer.flush()
     print(
@@ -138,7 +139,7 @@ def train(
         flush=True,
     )
 
-    if (cur_file_index) % save_interval == 0:
+    if (count_file) % save_interval == 0:
         model_save_path = os.path.join(
             model_dir,
             f"{config.training.out_predix}_epoch-{epoch}_file-{cur_file_index}.pt",
@@ -338,6 +339,8 @@ def main(config: DictConfig) -> None:
             num_layers=config.training.num_layers,
             forward_expansion=config.training.forward_expansion,
             seq_len=UP_SEQ_LEN + 3,  # include [SEP] and class1 class2
+            # seq_len=UP_SEQ_LEN, # exclude next_base and next_insertion
+            # seq_len=UP_SEQ_LEN + 2,  # include class1 class2
             dropout_rate=config.training.drop_out,
             num_class1=config.training.num_class_1,
             num_class2=config.training.num_class_2,
@@ -346,7 +349,7 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer_NoEmbedding(
             heads=config.training.heads,
             num_layers=config.training.num_layers,
-            seq_len=UP_SEQ_LEN,
+            seq_len=UP_SEQ_LEN, 
             dropout_rate=config.training.drop_out,
             forward_expansion=config.training.forward_expansion,
             num_class1=config.training.num_class_1,
@@ -365,12 +368,14 @@ def main(config: DictConfig) -> None:
 
     # load data from data_folder and training
     epochs = config.training.epochs
+    count_file = 0
     cur_file_index = 0
     for epoch in range(1, epochs + 1):
         print(f"Epoch: {epoch}", flush=True)
         for root, dirs, files in os.walk(config.data_path.label_f):
             for file in files:
                 cur_file_index += 1
+                count_file += 1
                 print(
                     f"Training on the file {cur_file_index} of epoch {epoch}",
                     flush=True,
@@ -403,6 +408,7 @@ def main(config: DictConfig) -> None:
                     writer,
                     epoch,
                     cur_file_index,
+                    count_file,
                     config,
                 )
                 # train_only_first(model, train_loader, test_loader, criterion_1, optimizer, config)

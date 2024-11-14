@@ -199,7 +199,7 @@ def input_tokenization_kmer(input_seq: str, k=3):
 
 
 def input_tokenization_include_ground_truth_kmer(
-    up_seq: str, label_1: str, label_2: str, kmer: int
+    up_seq: str, next_base: str, insertion: str, kmer: int
 ):
     input_array = []
     input_array = input_tokenization_kmer(up_seq, kmer)
@@ -207,7 +207,16 @@ def input_tokenization_include_ground_truth_kmer(
     if input_array is None:
         return None
     input_array.append(TOKENS.index("SEP"))
-    input_array.append(TOKENS.index(label_1))
-    input_array.append(TOKENS.index(label_2))
+    input_array.append(TOKENS.index(next_base))
+    input_array.append(TOKENS.index(insertion))
     return input_array
 
+def input_tokenization_without_grount_truth_kmer(
+    up_seq:str, kmer:int
+):
+    input_array = []
+    input_array = input_tokenization_kmer(up_seq, kmer)
+    
+    if input_array is None:
+        return None
+    return input_array

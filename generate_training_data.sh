@@ -12,7 +12,7 @@ usage() {
   echo ' --vcf_fn=FILE                The phased VCF file.'
   echo ''
   echo 'Optional parameters:'
-  echo '  --chunck_size=INT            The chunk size for parallel processing.'
+  echo '  --chunk_size=INT            The chunk size for parallel processing.'
   echo '  --samtools=STR               Path to samtools.'
   echo '  -win_s, --window_size_half                   the input window size'
   exit 1
@@ -28,7 +28,7 @@ if [ $# -eq 0 ]; then
 fi
 
 # Default values
-CHUNK_SIZE=1000000
+# CHUNK_SIZE=1000000
 SAMTOOLS="samtools"
 WINDOW_SIZE_HALF=41
 
@@ -55,7 +55,7 @@ while [[ "$#" -gt 0 ]]; do
     BED_FILE="$2"
     shift
     ;;
-  --chunck_size)
+  --chunk_size)
     CHUNK_SIZE="$2"
     shift
     ;;
@@ -168,12 +168,12 @@ chunk_file="$LABEL_PREFIX/chunks.txt"
 # touch "$chunk_file"
 
 # Get chromosome names and lengths using samtools
-# samtools idxstats "$BAM_FILE" | awk '{print $1, $2}' | while read -r chr length; do
-#   for ((start = 1; start <= $length; start += CHUNK_SIZE)); do
-#     end=$((start + CHUNK_SIZE - 1))
-#     if [ $end -ge "$length" ]; then end=$length; fi
-#     echo "$chr $start $end"
-#   done
-# done >"$chunk_file"
+#samtools idxstats "$BAM_FILE" | awk '{print $1, $2}' | while read -r chr length; do
+#  for ((start = 1; start <= $length; start += CHUNK_SIZE)); do
+#    end=$((start + CHUNK_SIZE - 1))
+#    if [ $end -ge "$length" ]; then end=$length; fi
+#    echo "$chr $start $end"
+#  done
+#done >"$chunk_file"
 
 cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" generate_training_data

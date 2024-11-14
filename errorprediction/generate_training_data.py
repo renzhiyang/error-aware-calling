@@ -1,6 +1,5 @@
 import os
 import pysam
-import hydra
 import gzip
 import argparse
 
@@ -108,7 +107,8 @@ def is_read_in_confident_region(
     read: pysam.AlignedSegment, confident_regions: list
 ) -> bool:
     for start, end in confident_regions:
-        if read.reference_end is None: return False
+        if read.reference_end is None:
+            return False
         if max(read.reference_start, start) <= min(read.reference_end, end):
             return True
     return False
@@ -237,7 +237,7 @@ def label_unphased_read(
     ref_seq: str,
     variants: dict,
     confident_regions: list,
-    args
+    args,
 ):
     """
     For unphased read
@@ -265,7 +265,7 @@ def label_unphased_read(
     )  # 得到的是align后的序列，也就是在IGV可以看到的序列，有可能是反向的
     if full_read_sequence is None:
         return
-    
+
     forward_sequence = read.get_forward_sequence()  # 得到的是完全正向的测序序列
     read_strand = "forward" if read.is_forward else "reverse"
     ref_seq = ref_seq[read.reference_start :]
@@ -273,10 +273,10 @@ def label_unphased_read(
     ref_pos_clip = 0
     read_pos = 0
 
-    for cigar_tuple in read.cigar: # type: ignore
+    for cigar_tuple in read.cigar:  # type: ignore
         cigar_op = cigar_tuple[0]
         length = cigar_tuple[1]
-        if cigar_op == 0:  # match pr mismatch
+        if cigar_op == 0:  # match or mismatch
             for i in range(length):
                 if ref_pos_clip + i >= len(ref_seq) or read_pos + i >= len(
                     full_read_sequence
@@ -288,6 +288,14 @@ def label_unphased_read(
                     continue
                 ref_base = ref_seq[ref_pos_clip + i]
                 read_base = full_read_sequence[read_pos + i]
+
+                # also include homoalt germline variants
+                is_germline = True if ref_pos_origin + i + 1 in variants else False
+                if is_germline:
+                    hap_1 = variants[ref_pos_origin + i + 1]["haplotype"][0]
+                    hap_2 = variants[ref_pos_origin + i + 1]["haplotype"][1]
+                    if hap_1 != hap_2:
+                        continue
 
                 """
                 # mismatch, and non germline variant loci, vcf file variant should change to 1-based.
@@ -329,9 +337,12 @@ def label_unphased_read(
 
                 # print(f"{read.query_name}, {read.reference_start} {read.reference_end}")
                 # new version, iterate read and print all sampels
-                base_type = "Postive" if ref_base == read_base else "Negative"
-                if ref_pos_origin + i + 1 in variants:
-                    continue
+                base_type = "Positive" if ref_base == read_base else "Negative"
+
+                # exclude positive samples:
+                # if base_type == "Positive":
+                #    continue
+
                 sequence_around = get_sequence(
                     full_read_sequence=ref_seq,
                     position=ref_pos_clip + i,
@@ -528,7 +539,7 @@ def label_phased_read(
 
                 """
                 if not is_germline and read_base != label: # old version: only for mismatch bases
-                    # 对于不是germline variant的位点，只取negative，即read base和reference base不同
+                    # 对于不是germline variant的位点,只取negative,即read base和reference base不同
                     # read base和reference base相同的情况直接跳过
                     # 需要用到forward_sequence, 完全正向的测序序列
                     # sequence_around = get_sequence(full_read_sequence=forward_sequence,
@@ -546,8 +557,8 @@ def label_phased_read(
                         is_indel=False,
                         args=args,
                     )
-                    # 注意：因为打印出来的是要1-base的position，因此要 ref_pos+i+1
-                    # 但是Indel的情况是不需要的，因为在记录Indel的时候，往往是以插入或删除块的前一个位点为基准
+                    # 注意: 因为打印出来的是要1-base的position, 因此要 ref_pos+i+1
+                    # 但是Indel的情况是不需要的, 因为在记录Indel的时候, 往往是以插入或删除块的前一个位点为基准
                     print_label(
                         chrom=chrom,
                         type=base_type,
@@ -631,6 +642,10 @@ def label_phased_read(
                 else:
                     # new version, also output samples from no-germline variant sites
                     base_type = "Positive" if read_base == label else "Negative"
+
+                    # exclude positive samples
+                    # if base_type == "Positive":
+                    #    continue
 
                     sequence_around = get_sequence(
                         full_read_sequence=ref_seq,
@@ -972,7 +987,6 @@ def generate_label(args):
     variants = vcf_reader.get_variants()
     reference = load_ref(args.ref_f)
     confident_regions = load_bed(args.confident_f)
-
     bam_file = pysam.AlignmentFile(args.tagged_bam, "rb")
 
     """ 
@@ -1029,7 +1043,6 @@ def generate_label(args):
     print(f"number of reads cover confident region & mp>=40: {count_conf} \n")
 
 
-# @hydra.main(version_base=None, config_path="../configs", config_name="defaults.yaml")
 def main():
     # config = config.label_data
     # print(config.label.window_size_half, config.data_path.label_f, flush=True)

@@ -223,7 +223,7 @@ predict() {
     --model "$MODEL" \
     --tensor_fn $tensor_f \
     --output_fn "$VCF_PREFIX/$vcf_name.vcf" \
-    --config_f "$CONFIG_FILE"
+    --config_fn "$CONFIG_FILE"
 }
 
 export MODEL CONFIG_FILE

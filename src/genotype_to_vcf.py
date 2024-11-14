@@ -40,6 +40,10 @@ def out_vcf_snv(
         # TODO currently only consider snv, exclude deletions
         return
 
+    # exclude homozygous reference
+    if snv_allele_1 == ref_base and snv_allele_2 == ref_base:
+        return 
+
     if snv_allele_1 == ref_base:
         ref = snv_allele_1
         alt = snv_allele_2

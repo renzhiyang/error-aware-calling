@@ -2,6 +2,8 @@ import re
 import shlex
 import argparse
 
+import errorprediction.utils as utils
+
 from subprocess import PIPE, Popen
 
 
@@ -41,6 +43,7 @@ def parse_md(md_tag):
     return parsed_md
 
 
+# old version, it doesn't consider the reverse strand
 def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
     """
     Reconstruct the reference and query sequences with gaps ('-') for insertions and deletions
@@ -114,10 +117,105 @@ def reconstruct_ref_seq(query_seq, md_tag, cigar, start_pos, end_pos):
                 ref_index += 1
                 pointer += 1
 
-                # if pointer >= end_pos:  # if reach the candidate position, then
-                #   stop = True
-                #   break
         length = 0
+    final_ref = "".join(final_ref)
+
+    # print test codes
+    """
+    if "-" in final_ref:
+        print(f'position: {end_pos}')
+        #print(f'position: {end_pos}, cigar: {cigar}, md:{md_tag} {parsed_md}, start:{start_pos}')
+        print(f'ref: {final_ref[-10:]}')
+        #print(f'ini: {ref_seq}')
+        print(f'que: {query_seq[-10:]}\n')
+    """
+    return final_ref
+
+
+def reconstruct_ref_seq_new(query_seq, is_forward, md_tag, cigar, start_pos, end_pos):
+    """
+    Reconstruct the reference and query sequences with gaps ('-') for insertions and deletions
+    e.g.,
+    query_seq = "GAGAATTTAC"
+    md_tag = "2A2^AA2"
+    cigar = "2M3I3M2D2M"
+    output:
+        ref_seq:  GA---ATTAAAC
+    """
+    ref_seq = ""
+    parsed_md = parse_md(md_tag)
+
+    # generate an initial reference sequence
+    # In the example, MD: 2A2^AA2. initial ref: MMAMMAAMM
+    for tag, part in parsed_md:
+        if tag == "M":
+            ref_seq += "M" * int(part)
+        elif tag in "XD":
+            ref_seq += part
+
+    # Then replace "M" and insert "-" to initial ref using CIGAR and query_seq
+    length = 0
+    is_deletion = False
+    del_len = 0
+    query_index = 0
+    ref_index = 0
+    ref_candidate_pos = ref_index
+    pointer = start_pos
+    final_ref = []
+    stop = False
+    for b in cigar:
+        # if stop:
+        #     break
+
+        if b.isdigit():
+            length = length * 10 + int(b)
+            continue
+
+        if b == "S":
+            query_index += length
+
+        elif b in "MX=":
+            for _ in range(length):
+                if pointer == end_pos:
+                    # stop = True
+                    ref_candidate_pos = ref_index
+                    # break
+                query_base = query_seq[query_index]
+                ref_base = ref_seq[ref_index]
+                if ref_base == "M":
+                    final_ref.append(query_base)
+                else:
+                    final_ref.append(ref_base)
+                ref_index += 1
+                query_index += 1
+                pointer += 1
+
+        elif b == "I":
+            inserted = "-" * length
+            final_ref.append(inserted)
+            query_index += length
+
+        elif b == "D":
+            for _ in range(length):
+                if pointer == end_pos or pointer + length >= end_pos:  # if reach the candidate position, then
+                    # TODO there is a bug for deletion
+                    # refer to chr21:29048050
+                    ref_candidate_pos = ref_index
+                    is_deletion = True
+                    del_len = length
+                delete_base = ref_seq[ref_index]
+                final_ref.append(delete_base)
+                ref_index += 1
+                pointer += 1
+
+        length = 0
+
+    if is_forward:
+        final_ref = final_ref[:ref_candidate_pos]
+    else:
+        final_ref = final_ref[ref_candidate_pos+1:]
+        if is_deletion: # TODO there is a bug for deletion case
+            final_ref = final_ref[ref_candidate_pos+del_len:]
     final_ref = "".join(final_ref)
 
     # print test codes
@@ -181,10 +279,15 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     read = read.decode()
     read = read.strip().split()
     CAN_POS = candidate_pos  # candidate position, 1-based position in ctg
+    FLAG = int(read[1])
     QUERY_POS = int(read[3])  # leftmost mapping, 1-based position in ctg
     CIGAR = read[5]
     SEQ = read[9].upper()
     MD = None
+    is_forward = 1 if FLAG & 16 == 0 else 0
+
+    # if not FORWARD_STRAND:
+    #    SEQ = utils.reverse_complement(SEQ)
 
     for field in read:
         if field.startswith("MD:Z:"):
@@ -195,8 +298,14 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
         print()
 
     # get the previous reference bases before the current candidate position
-    ref_seq = reconstruct_ref_seq(SEQ, MD, CIGAR, QUERY_POS, CAN_POS)
+    # ref_seq = reconstruct_ref_seq(SEQ, MD, CIGAR, QUERY_POS, CAN_POS)
+    ref_seq = reconstruct_ref_seq_new(SEQ, is_forward, MD, CIGAR, QUERY_POS, CAN_POS)
     cur_base, next_ins = get_query_base(SEQ, CIGAR, QUERY_POS, CAN_POS)
+
+    if not is_forward:
+        ref_seq = utils.reverse_complement(ref_seq)
+        cur_base = utils.reverse_complement(cur_base)
+        next_ins = utils.reverse_complement(next_ins)
 
     if window_width > len(ref_seq):
         padding_seq = (window_width - len(ref_seq)) * "N"  # 'N' represent padding base
@@ -204,13 +313,12 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     else:
         ref_seq = ref_seq[len(ref_seq) - window_width :]
 
-        # if next_ins != "N":
     # if cur_base == "-":
     #     print(
     #         f"start_pos: {QUERY_POS}, end_pos: {CAN_POS}, cur_base: {cur_base}, next_ins: {next_ins}"
     #     )
     #     print(f"ref_seq: {ref_seq}")
-    return ref_seq, cur_base, next_ins
+    return is_forward, ref_seq, cur_base, next_ins
 
 
 def create_tensor(args):
@@ -226,6 +334,15 @@ def create_tensor(args):
     output_tensor_fn = open(tensor_fn, "w")
     for line in candidates:
         ctg_name, candidate_pos = candidate_information_from(line)
+
+        # print test
+        # if candidate_pos != 29977927: # snv
+        # if candidate_pos != 29048050: # deletion
+        # if candidate_pos != 29036349: # snv
+        # if candidate_pos != 29003614: # deletion
+        #if candidate_pos != 29002949: # snv
+        #    continue
+
         subprocess = samtools_view_from(
             ctg_name, candidate_pos, candidate_pos + 1, bam_fn, min_mq, samtools
         )
@@ -235,7 +352,7 @@ def create_tensor(args):
             continue
 
         for i, read in enumerate(reads):
-            tensor_sequence, cur_base, next_ins = get_tensor_sequence_from(
+            is_forward, tensor_sequence, cur_base, next_ins = get_tensor_sequence_from(
                 read, candidate_pos, window_width
             )
             if cur_base == "":  # for some reads, there are all ""
@@ -245,6 +362,8 @@ def create_tensor(args):
                 next_ins = "rep" + str(len(next_ins))
             elif len(next_ins) > 6:
                 continue
+
+            read_strand = "forward" if is_forward else "reverse"
 
             output_line = (
                 f"{ctg_name}"
@@ -256,6 +375,8 @@ def create_tensor(args):
                 + cur_base
                 + "\t"
                 + next_ins
+                + "\t"
+                + read_strand
                 + "\n"
             )
             output_tensor_fn.write(output_line)
