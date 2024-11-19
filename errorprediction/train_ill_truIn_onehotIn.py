@@ -176,7 +176,7 @@ def test(model, test_loader, criterion_1, criterion_2, config):
             _, insertion = torch.max(insertion_p.data, 1)
             _, true_next_base = torch.max(labels_1.data, 1)
             _, true_insertion = torch.max(labels_2.data, 1)
-            # print(f'next_base: {next_base_p}')
+            # print(f'next_base_dis: {next_base_p}')
             # print(f'insertion: {insertion_p}')
             # print(f'true_next_base: {labels_1}')
             # print(f'next_base: {next_base}, insertion: {insertion}')
@@ -349,7 +349,7 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer_NoEmbedding(
             heads=config.training.heads,
             num_layers=config.training.num_layers,
-            seq_len=UP_SEQ_LEN, 
+            seq_len=UP_SEQ_LEN,
             dropout_rate=config.training.drop_out,
             forward_expansion=config.training.forward_expansion,
             num_class1=config.training.num_class_1,
