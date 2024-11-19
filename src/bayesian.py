@@ -76,7 +76,7 @@ class BayesianCaller:
         # initialize base_prior_prob_dic and insertion_prior_prob_dic
         self.initialize_prior_prob_dic(cur_base_dis, insertion_dis)
         # print(
-        # f"len base_prior_prob_dic: {len(self.base_prior_prob_dic)}, len insertion_prior_prob_dic: {len(self.insertion_prior_prob_dic)}"
+        # f"base_prior_prob_dic: {self.base_prior_prob_dic}"
         # )
 
         # calculate posterior probability for each genotype

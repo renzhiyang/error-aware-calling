@@ -2,6 +2,7 @@
 import os
 from regex import W
 import yaml
+import math
 import torch
 import argparse
 import numpy as np
@@ -72,6 +73,41 @@ def normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
     shift_tensor = tensor - tensor.min() + 1  # +1 to avoid 0 probs
     normalized_tensor = shift_tensor / shift_tensor.sum()
     return normalized_tensor
+
+
+def normalize_genotype(genotype_prob, top: int):
+    # genotype_prob are like:  snv: [('snv_C_C', -94.84156544749021), ...]
+    # all values are negative
+    # return the top genotypes probs and normalize them to [0,1]
+    genotype_prob = genotype_prob[:top]
+    # probs = [value for _, value in genotype_prob]
+    # min_prob = probs[-1]
+    # shift_probs = [(value - min_prob) + 1 for value in probs]
+    # total_probs = sum(shift_probs)
+    # normalize_probs = [shift_prob / total_probs for shift_prob in shift_probs]
+
+    # linear scaling with clipping
+    log_probs = [prob for _, prob in genotype_prob]
+    min_prob = min(log_probs)
+    max_prob = max(log_probs)
+    normalize_probs = []
+    for prob in log_probs:
+        prob = (prob - min_prob) / (max_prob - min_prob)
+        prob = 0.1 + 0.8 * prob
+        normalize_probs.append(prob)
+    normalize_probs = [prob / sum(normalize_probs) for prob in normalize_probs]
+
+    # softmax normalize genotypes
+    # probs = [math.exp(value) for _, value in genotype_prob]
+    # normalize_probs = [prob / sum(probs) for prob in probs]
+
+    # sigmoid normalize genotypes
+    # probs = [1/(1+math.exp(-prob)) for _, prob in genotype_prob]
+    # normalize_probs = probs / np.sum(probs)
+
+    for i in range(len(normalize_probs)):
+        genotype_prob[i] = (genotype_prob[i][0], normalize_probs[i])
+    return genotype_prob
 
 
 def reverse_prob_distributions(next_base_dis, insertion_dis):
@@ -162,13 +198,18 @@ def predict(args):
         print(f"position: {pos}, most likelily genotype: {next(iter(sorted_probs))}")
 
 
-def print_genotype(cur_pos, cur_probs, out_fn):
+def print_genotype(cur_pos, cur_probs, bayesian_threshold, out_fn):
     snv_probs = {k: v for k, v in cur_probs.items() if k.startswith("snv")}
     ins_probs = {k: v for k, v in cur_probs.items() if k.startswith("insertion")}
 
     snv_sorted = sorted(snv_probs.items(), key=lambda x: x[1], reverse=True)
     ins_sorted = sorted(ins_probs.items(), key=lambda x: x[1], reverse=True)
-    outline = f"position: {cur_pos}  snv: {snv_sorted[:5]}  ins: {ins_sorted[:5]} \n"
+    snv_sorted = normalize_genotype(snv_sorted, 5)
+    ins_sorted = normalize_genotype(ins_sorted, 5)
+    if snv_sorted[0][1] < bayesian_threshold:
+        # filter genotype with prob smaller than threshold
+        return
+    outline = f"position: {cur_pos}  snv: {snv_sorted}  ins: {ins_sorted} \n"
     out_fn.write(outline)
     print(outline, flush=True)
 
@@ -177,6 +218,9 @@ def predict_kmer(args):
     model_fn = args.model
     tensor_fn = args.tensor_fn
     out_fn = args.output_fn
+
+    # print button
+    is_print_test = False
 
     # check file path
     if not os.path.exists(model_fn):
@@ -236,13 +280,13 @@ def predict_kmer(args):
 
             position = int(id.split("_")[1])
 
-            # if position != 29855876:
-            #  position != 29948200:
-            #     continue
+            if is_print_test:
+                if position != 29422047:
+                    continue
 
             if cur_pos != position:
                 if cur_pos != 0:
-                    print_genotype(cur_pos, cur_probs, out_fn)
+                    print_genotype(cur_pos, cur_probs, args.bayesian_threshold, out_fn)
                 cur_pos = position
                 cur_probs = []
 
@@ -259,8 +303,8 @@ def predict_kmer(args):
             next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
             insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
 
-            next_base_dis = normalize_tensor(next_base_dis)
-            insertion_base_dis = normalize_tensor(insertion_base_dis)
+            # next_base_dis = normalize_tensor(next_base_dis)
+            # insertion_base_dis = normalize_tensor(insertion_base_dis)
 
             # for reverse strand, change the order of prob distributions
             if read_strand == "reverse":
@@ -274,11 +318,12 @@ def predict_kmer(args):
                 )
 
             # print test
-            max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
-            #print(
-            #    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
-            #    flush=True,
-            #)
+            if is_print_test:
+                max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+                print(
+                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
+                    flush=True,
+                )
 
             all_genotype_pos_probs_one_read = (
                 caller.all_genotypes_posterior_prob_per_read_log(
@@ -302,7 +347,8 @@ def predict_kmer(args):
                 )
                 # print(f"position: {cur_pos}, probs: {cur_probs}")
 
-    #print_genotype(cur_pos, cur_probs, out_fn)
+    if is_print_test:
+        print_genotype(cur_pos, cur_probs, args.bayesian_threshold, out_fn)
 
 
 def main():
@@ -331,6 +377,11 @@ def main():
         "--output_fn",
         type=str,
         help="the output file, finnaly it will be a VCF file",
+    )
+    parser.add_argument(
+        "--bayesian_threshold",
+        type=float,
+        help="a threshold that filter genotype with probability, in range of [0,1]",
     )
     args = parser.parse_args()
     # predict(args)

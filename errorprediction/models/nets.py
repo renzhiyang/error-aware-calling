@@ -289,6 +289,8 @@ class Encoder_Transformer(nn.Module):
         output_1 = self.fc1(encoded_output)
         output_2 = self.fc2(encoded_output)
 
+        output_1 = torch.softmax(output_1, 1)
+        output_2 = torch.softmax(output_2, 1)
         return output_1, output_2
 
 

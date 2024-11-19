@@ -136,10 +136,12 @@ fi
 # create intermediate directory
 CANDIDATES_PREFIX="$OUTPUT_PREFIX/candidates"
 TENSOR_PREFIX="$OUTPUT_PREFIX/tensor"
+GENOTYPE_PREFIX="$OUTPUT_PREFIX/genotype"
 VCF_PREFIX="$OUTPUT_PREFIX/vcf"
 mkdir -p "$CANDIDATES_PREFIX"
 mkdir -p "$TENSOR_PREFIX"
 mkdir -p "$VCF_PREFIX"
+mkdir -p "$GENOTYPE_PREFIX"
 
 ############### FIRST STEP: Find candidates and generate tensor file
 find_candidates_generate_tensors() {
@@ -166,13 +168,14 @@ find_candidates_generate_tensors() {
       --ref_fn "$REF_FILE" \
       --bam_fn "$BAM_FILE" \
       --candidates_fn "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates" \
-      --tensor_fn "$TENSOR_PREFIX/$ctg_name.$ctg_start-$ctg_end.tensor"
+      --tensor_fn "$TENSOR_PREFIX/$ctg_name.$ctg_start-$ctg_end.tensor" \
+      --tensor_window_width 40
   fi
 }
 
 export -f find_candidates_generate_tensors
 export PARALLEL="--jobs $SLOTS"
-export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX VCF_PREFIX
+export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX GENOTYPE_PREFIX VCF_PREFIX
 
 # Function to combine candidate files for each chromosome
 combine_candidates() {
@@ -217,13 +220,14 @@ fi
 ############### Step2: Predicting ###############
 predict() {
   local tensor_f=$1
-  vcf_filename="${tensor_f##*/}"
-  vcf_name="${vcf_filename%.tensor}"
+  geno_filename="${tensor_f##*/}"
+  geno_name="${geno_filename%.tensor}"
   python predict.py \
     --model "$MODEL" \
     --tensor_fn $tensor_f \
-    --output_fn "$VCF_PREFIX/$vcf_name.vcf" \
-    --config_fn "$CONFIG_FILE"
+    --output_fn "$GENOTYPE_PREFIX/$geno_name.genotype" \
+    --config_fn "$CONFIG_FILE" \
+    --bayesian_threshold 0.00
 }
 
 export MODEL CONFIG_FILE
@@ -231,3 +235,24 @@ export -f predict
 
 # process tensor files using GNU parallel with limited threads
 find "$TENSOR_PREFIX" -name "*.tensor" | parallel --jobs "$SLOTS" predict
+
+# convert genotype to vcf file
+convert_geno_to_vcf() {
+  local geno_file=$1
+  vcf_filename="${geno_file##*/}"
+  vcf_name="${vcf_filename%.genotype}"
+  ctg_name=$(echo $vcf_name | cut -d. -f1)
+  python -m src.genotype_to_vcf \
+    --ref_fn $REF_FILE \
+    --geno_fn $geno_file \
+    --vcf_fn "$VCF_PREFIX/$vcf_name.vcf" \
+    --ctg_name $ctg_name
+  bgzip "$VCF_PREFIX/$vcf_name.vcf"
+  bcftools index "$VCF_PREFIX/$vcf_name.vcf.gz"
+}
+
+export -f convert_geno_to_vcf
+# vcf files are output to VCF_PREFIX folder
+find "$GENOTYPE_PREFIX" -name "*.genotype" | parallel --jobs "$SLOTS" convert_geno_to_vcf
+bcftools merge "$VCF_PREFIX"/*.vcf.gz -Oz -o "$OUTPUT_PREFIX/prediction.vcf.gz"
+bcftools index "$OUTPUT_PREFIX/prediction.vcf.gz"
