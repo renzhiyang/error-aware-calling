@@ -92,7 +92,7 @@ def normalize_genotype(genotype_prob, top: int):
     max_prob = max(log_probs)
     normalize_probs = []
     for prob in log_probs:
-        prob = (prob - min_prob) / (max_prob - min_prob)
+        prob = (prob - min_prob) / (max_prob - min_prob + 0.1)  # plus 0.1 to avoid be 0
         prob = 0.1 + 0.8 * prob
         normalize_probs.append(prob)
     normalize_probs = [prob / sum(normalize_probs) for prob in normalize_probs]
@@ -119,86 +119,7 @@ def reverse_prob_distributions(next_base_dis, insertion_dis):
     return next_base_dis, insertion_dis
 
 
-def predict(args):
-    model_fn = args.model
-    tensor_fn = args.tensor_fn
-
-    # check file path
-    if not os.path.exists(model_fn):
-        print(f"Error: Model file '{model_fn}' does not exist.")
-        return
-    if not os.path.isfile(tensor_fn):
-        print(f"Error: Tensor file '{tensor_fn}' does not exist.")
-        return
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # if torch.device("mps"):
-    #    device = torch.device("mps")
-
-    print(f"device: {device}")
-    # model = Baseline().to(device)
-    model = nets.Encoder_Transformer(
-        embed_size=54,
-        vocab_size=216,
-        num_layers=1,
-        forward_expansion=1024,
-        seq_len=97,
-        dropout_rate=0.1,
-        num_class1=5,
-        num_class2=25,
-    ).to(device)
-    model.load_state_dict(torch.load(model_fn, map_location=device))
-    model.eval()
-
-    dataset = TensorData(tensor_fn)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)  # type: ignore
-    caller = bayesian.BayesianCaller()
-    pos_probs_in_pos = {}  # key:position, value: all reads' posterior probs dict
-    # count = 0
-    for position, idx, tensor_one_hot, observe_b, observe_ins in dataloader:
-        tensor_one_hot = tensor_one_hot.float().to(device)
-        observe_b = observe_b[0]
-        observe_ins = observe_ins[0]
-        next_base_dis, insertion_dis = model(tensor_one_hot)
-
-        # test codes
-        # print(f"min max base: {next_base_dis.min()}, {next_base_dis.max()}")
-        # print(f"min max ins: {insertion_dis.min()}, {insertion_dis.max()}")
-        # print(f"position:{position}, tensor:{tensor_one_hot}")
-        # print(f"position:{position}, observe_b:{observe_b}, observe_ins:{observe_ins}")
-
-        position = position.numpy().item()
-        next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
-        insertion_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
-
-        next_base_dis = normalize_tensor(next_base_dis)
-        insertion_dis = normalize_tensor(insertion_dis)
-
-        # test codes
-        # print(f"observed base:{observe_b}, next base dis:{next_base_dis}")
-
-        if position not in pos_probs_in_pos:
-            pos_probs_in_pos[position] = []
-
-        all_genotype_pos_probs_one_read = (
-            caller.all_genotypes_posterior_prob_per_read_log(
-                next_base_dis, insertion_dis, observe_b, observe_ins
-            )
-        )
-
-        if len(pos_probs_in_pos[position]) == 0:
-            pos_probs_in_pos[position] = all_genotype_pos_probs_one_read
-        else:
-            pos_probs_in_pos[position] = caller.multiply_pos_probs_of_two_reads(
-                pos_probs_in_pos[position], all_genotype_pos_probs_one_read
-            )
-
-    for pos, pos_probs in pos_probs_in_pos.items():
-        sorted_probs = sorted(pos_probs.items(), key=lambda x: x[1], reverse=True)
-        print(f"position: {pos}, most likelily genotype: {next(iter(sorted_probs))}")
-
-
-def print_genotype(cur_pos, cur_probs, bayesian_threshold, out_fn):
+def print_genotype(ctg_name, cur_pos, cur_probs, bayesian_threshold, out_fn):
     snv_probs = {k: v for k, v in cur_probs.items() if k.startswith("snv")}
     ins_probs = {k: v for k, v in cur_probs.items() if k.startswith("insertion")}
 
@@ -209,12 +130,14 @@ def print_genotype(cur_pos, cur_probs, bayesian_threshold, out_fn):
     if snv_sorted[0][1] < bayesian_threshold:
         # filter genotype with prob smaller than threshold
         return
-    outline = f"position: {cur_pos}  snv: {snv_sorted}  ins: {ins_sorted} \n"
+    outline = (
+        f"ctg:{ctg_name}  position:{cur_pos}  snv:{snv_sorted}  ins:{ins_sorted} \n"
+    )
     out_fn.write(outline)
     print(outline, flush=True)
 
 
-def predict_kmer(args):
+def predict_bayesian2(args):
     model_fn = args.model
     tensor_fn = args.tensor_fn
     out_fn = args.output_fn
@@ -259,7 +182,162 @@ def predict_kmer(args):
     model.eval()
 
     cur_pos = 0
-    cur_probs = []
+    likelihoods = []
+
+    with torch.no_grad():
+        base_count = {base: 0 for base in utils.CLASSES_PROB_1}
+        ins_count = {ins: 0 for ins in utils.CLASSES_PROB_2}
+        for line in tensor_f:
+            line = line.strip().split()
+
+            ctg_name = line[0]
+            id = line[1]
+            input_seq = line[2]
+            observe_b = str(line[3])
+            observe_ins = str(line[4])
+            read_strand = line[5]
+            observe_ins = "-" if observe_ins == "N" else observe_ins
+
+            # count base and insertion, they are used for calculate prior probability of genotype
+            base_count[observe_b] += 1
+            ins_count[observe_ins] += 1
+
+            # TODO for some case, label_2 is like "AN"
+            # should fix this error
+            if "N" in observe_ins:
+                continue
+
+            position = int(id.split("_")[1])
+
+            if is_print_test:
+                # if position not in (29422047, 29782547):
+                if position != 29422047:
+                    continue
+
+            if cur_pos != position:
+                if cur_pos != 0:
+                    print(f"base count: {base_count}")
+                    # print the posterior probability of genotype
+                    prior_genotypes = caller.prior_probability_of_genotype_log(
+                        base_count, ins_count
+                    )
+                    pos_probs = {
+                        key: prior_genotypes[key] + likelihoods[key]
+                        for key in prior_genotypes
+                    }
+
+                    print_genotype(
+                        ctg_name, cur_pos, pos_probs, args.bayesian_threshold, out_fn
+                    )
+                    # reset counts
+                    base_count = {base: 0 for base in base_count}
+                    ins_count = {ins: 0 for ins in ins_count}
+
+                cur_pos = position
+                likelihoods = []
+
+            input_tokenization = (
+                model_utils.input_tokenization_include_ground_truth_kmer(
+                    input_seq, observe_b, observe_ins, params["kmer"]
+                )
+            )
+            # tensor_kmer = utils.kmer_seq(input_seq, k=params["kmer"])
+            input_tensor = (
+                torch.tensor(input_tokenization).float().unsqueeze(0).to(device)
+            )
+            next_base_dis, insertion_dis = model(input_tensor)
+            next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
+            insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
+
+            # for reverse strand, change the order of prob distributions
+            if read_strand == "reverse":
+                # in the genotype calculate, it should use forward-based nucleotide
+                observe_b = model_utils.reverse_complement(observe_b)
+                # TODO include insertion
+                # observe_ins = model_utils.reverse_complement(observe_ins)
+
+                next_base_dis, insertion_base_dis = reverse_prob_distributions(
+                    next_base_dis, insertion_base_dis
+                )
+
+            # print test
+            if is_print_test:
+                max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+                print(
+                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
+                    flush=True,
+                )
+
+            all_genotype_pos_probs_one_read = (
+                caller.all_genotypes_likelihood_per_read_log(
+                    next_base_dis, insertion_base_dis, observe_b, observe_ins
+                )
+            )
+            if len(likelihoods) == 0:
+                likelihoods = all_genotype_pos_probs_one_read
+            else:
+                likelihoods = caller.add_pos_probs_of_two_reads(
+                    likelihoods, all_genotype_pos_probs_one_read
+                )
+                # print(f"position: {cur_pos}, probs: {cur_probs}")
+
+    if is_print_test:
+        print(f"base count: {base_count}")
+        prior_genotypes = caller.prior_probability_of_genotype_log(
+            base_count, ins_count
+        )
+        pos_probs = {
+            key: prior_genotypes[key] + likelihoods[key] for key in prior_genotypes
+        }
+        print_genotype("chr21", cur_pos, likelihoods, args.bayesian_threshold, out_fn)
+
+
+def predict_bayesian1(args):
+    model_fn = args.model
+    tensor_fn = args.tensor_fn
+    out_fn = args.output_fn
+
+    # print button
+    is_print_test = False
+
+    # check file path
+    if not os.path.exists(model_fn):
+        print(f"Error: Model file '{model_fn}' does not exist.")
+        return
+    if not os.path.isfile(tensor_fn):
+        print(f"Error: Tensor file '{tensor_fn}' does not exist.")
+        return
+
+    # new predicted results file of current tensors
+    out_fn = open(out_fn, "w")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tensor_f = open(tensor_fn, "r")
+    caller = bayesian.BayesianCaller()
+    params = load_model_paras(args.config_fn)
+
+    # calculate the kmer vocabulary size
+    # [0:kmer_token_shift] values encode class values and [SEP] symbol
+    VOCAB_SIZE = params["num_tokens"] ** params["kmer"] + params["kmer_token_shift"]
+
+    print(f"device: {device}")
+    # model = Baseline().to(device)
+    model = nets.Encoder_Transformer(
+        embed_size=params["embed_size"],
+        vocab_size=VOCAB_SIZE,
+        num_layers=params["num_layers"],
+        forward_expansion=params["forward_expansion"],
+        seq_len=params["up_seq_len"] - params["kmer"] + 4,  # with [sep] symbol
+        # seq_len=params["up_seq_len"] - params["kmer"] + 3,  # without [sep] symbol
+        dropout_rate=params["drop_out"],
+        num_class1=params["num_class_1"],
+        num_class2=params["num_class_2"],
+    ).to(device)
+    model.load_state_dict(torch.load(model_fn, map_location=device, weights_only=True))
+    model.eval()
+
+    cur_pos = 0
+    cur_probs = {}
 
     with torch.no_grad():
         for line in tensor_f:
@@ -286,9 +364,11 @@ def predict_kmer(args):
 
             if cur_pos != position:
                 if cur_pos != 0:
-                    print_genotype(cur_pos, cur_probs, args.bayesian_threshold, out_fn)
+                    print_genotype(
+                        ctg_name, cur_pos, cur_probs, args.bayesian_threshold, out_fn
+                    )
                 cur_pos = position
-                cur_probs = []
+                cur_probs = {}
 
             input_tokenization = (
                 model_utils.input_tokenization_include_ground_truth_kmer(
@@ -348,7 +428,7 @@ def predict_kmer(args):
                 # print(f"position: {cur_pos}, probs: {cur_probs}")
 
     if is_print_test:
-        print_genotype(cur_pos, cur_probs, args.bayesian_threshold, out_fn)
+        print_genotype("chr21", cur_pos, cur_probs, args.bayesian_threshold, out_fn)
 
 
 def main():
@@ -384,8 +464,8 @@ def main():
         help="a threshold that filter genotype with probability, in range of [0,1]",
     )
     args = parser.parse_args()
-    # predict(args)
-    predict_kmer(args)
+    # predict_bayesian2(args)
+    predict_bayesian1(args)
 
 
 if __name__ == "__main__":
