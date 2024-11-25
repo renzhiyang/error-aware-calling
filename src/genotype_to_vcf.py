@@ -20,12 +20,12 @@ def load_ref_seq(ref_fn, ctg_name):
     return ref_seq
 
 
-def write_header(vcf_f, ref_fn):
+def write_header(vcf_f, ref_fn, ctg_name, len_ref):
     header = (
         "##fileformat=VCFv4.2\n"
         f"##source=custom_script\n"
         f"##reference={ref_fn}\n"
-        "##contig=<ID=chr20,length=64444167,assembly=GRCh38,"
+        f"##contig=<ID={ctg_name},length={len_ref},assembly=GRCh38,"
         "md5=b18e6c531b0bd70e949a7fc20859cb01,species='Homo sapiens',taxonomy=x>\n"
         "##FORMAT=<ID=GT,Number=1,Type=String,Description='Genotype'>\n"
         "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n"
@@ -80,9 +80,10 @@ def convert_genotype_to_vcf(args):
     insertion_pattern = r"ins:\s*\[\('([^']+)',\s*([-+]?\d*\.\d+|\d+)\)"
 
     ref_seq = load_ref_seq(REF_FN, CTG_NAME)
+    len_ref_seq = len(ref_seq)
 
     # write header info to vcf file
-    write_header(out_vcf, REF_FN)
+    write_header(out_vcf, REF_FN, CTG_NAME, len_ref_seq)
 
     for line in geno_f:
         position_match = re.search(position_pattern, line)

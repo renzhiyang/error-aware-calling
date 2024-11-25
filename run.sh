@@ -15,6 +15,7 @@ usage() {
   echo '  --config_f=FILE              The configuration file.'
   echo '  --chunck_size=INT            The chunk size for parallel processing.'
   echo '  --samtools=STR               Path to samtools.'
+  echo '  --min_af=FLOAT               Minimum allele frequency of candidates.'
   exit 1
 }
 
@@ -31,6 +32,7 @@ fi
 BED_FILE=""
 CHUNK_SIZE=1000000
 SAMTOOLS="samtools"
+MIN_AF=0.3
 
 ############### Parse command line arguments
 while [[ "$#" -gt 0 ]]; do
@@ -64,11 +66,15 @@ while [[ "$#" -gt 0 ]]; do
     shift
     ;;
   --chunck_size)
-    CHUNK_SIZE="$2"
+    CHUNK_SIZE="${2:-$CHUNK_SIZE}"
+    shift
+    ;;
+  --min_af)
+    MIN_AF="${2:-$MIN_AF}"
     shift
     ;;
   --samtools)
-    SAMTOOLS="$2"
+    SAMTOOLS="${2:-$SAMTOOLS}"
     shift
     ;;
 
@@ -120,6 +126,7 @@ echo "Output Prefix: $OUTPUT_PREFIX"
 echo "Slots: $SLOTS"
 echo "BED File: $BED_FILE"
 echo "Chunk Size: $CHUNK_SIZE"
+echo "Min allele frequency: $MIN_AF"
 echo ""
 
 ############### Check if required files exits
@@ -143,11 +150,14 @@ mkdir -p "$TENSOR_PREFIX"
 mkdir -p "$VCF_PREFIX"
 mkdir -p "$GENOTYPE_PREFIX"
 
-############### FIRST STEP: Find candidates and generate tensor file
+################################################################################################
+############### FIRST STEP: Find candidates and generate tensor file ###########################
+################################################################################################
 find_candidates_generate_tensors() {
   local ctg_name=$1
   local ctg_start=$2
   local ctg_end=$3
+  echo $MIN_AF
   # echo "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   python ./src/find_candidates.py \
     --bam_fn "$BAM_FILE" \
@@ -157,7 +167,7 @@ find_candidates_generate_tensors() {
     --ctg_end "$ctg_end" \
     --min_mq 20 \
     --min_coverage 10 \
-    --min_allele_freq 0.125 \
+    --min_allele_freq $MIN_AF \
     >"$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates"
   # Remove file if it's empty
   if [ ! -s "$CANDIDATES_PREFIX/$ctg_name.$ctg_start-$ctg_end.candidates" ]; then
@@ -176,6 +186,7 @@ find_candidates_generate_tensors() {
 export -f find_candidates_generate_tensors
 export PARALLEL="--jobs $SLOTS"
 export BAM_FILE REF_FILE OUTPUT_PREFIX CANDIDATES_PREFIX TENSOR_PREFIX GENOTYPE_PREFIX VCF_PREFIX
+export MIN_AF CHUNK_SIZE
 
 # Function to combine candidate files for each chromosome
 combine_candidates() {
@@ -212,12 +223,14 @@ else
 fi
 
 # Process chunks using GNU parallel with limited threads
-# cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates_generate_tensors
+cat "$chunk_file" | parallel --colsep ' ' -j "$SLOTS" find_candidates_generate_tensors
 
 # delete candidate files
 # rm "$CANDIDATES_PREFIX"/*.candidates
 
-############### Step2: Predicting ###############
+#######################################################
+############### SECOND STEP: Predicting ###############
+#######################################################
 predict() {
   local tensor_f=$1
   geno_filename="${tensor_f##*/}"
@@ -236,6 +249,16 @@ export -f predict
 # process tensor files using GNU parallel with limited threads
 find "$TENSOR_PREFIX" -name "*.tensor" | parallel --jobs "$SLOTS" predict
 
+cat "$GENOTYPE_PREFIX"/*.genotype >"$OUTPUT_PREFIX/prediction.genotype"
+python -m src.genotype_to_vcf \
+  --ref_fn $REF_FILE \
+  --geno_fn "$OUTPUT_PREFIX/prediction.genotype" \
+  --vcf_fn "$OUTPUT_PREFIX/prediction.vcf" \
+  --ctg_name "chr21"
+bgzip "$OUTPUT_PREFIX/prediction.vcf"
+bcftools sort "$OUTPUT_PREFIX/prediction.vcf.gz" -o "$OUTPUT_PREFIX/prediction.sorted.vcf.gz"
+bcftools index "$OUTPUT_PREFIX/prediction.sorted.vcf.gz"
+
 # convert genotype to vcf file
 convert_geno_to_vcf() {
   local geno_file=$1
@@ -251,8 +274,11 @@ convert_geno_to_vcf() {
   bcftools index "$VCF_PREFIX/$vcf_name.vcf.gz"
 }
 
-export -f convert_geno_to_vcf
+#export -f convert_geno_to_vcf
 # vcf files are output to VCF_PREFIX folder
-find "$GENOTYPE_PREFIX" -name "*.genotype" | parallel --jobs "$SLOTS" convert_geno_to_vcf
-bcftools merge "$VCF_PREFIX"/*.vcf.gz -Oz -o "$OUTPUT_PREFIX/prediction.vcf.gz"
-bcftools index "$OUTPUT_PREFIX/prediction.vcf.gz"
+# TODO: bug, we should cat all genotype files to one file and then convert to vcf
+# so we should print ctg_name in genotype file, then src.genotype_to_vcf can read it and delete
+# parameter --ctg_name
+#find "$GENOTYPE_PREFIX" -name "*.genotype" | parallel --jobs "$SLOTS" convert_geno_to_vcf
+#bcftools merge "$VCF_PREFIX"/*.vcf.gz -Oz -o "$OUTPUT_PREFIX/prediction.vcf.gz" --force-samples
+#bcftools index "$OUTPUT_PREFIX/prediction.vcf.gz"
