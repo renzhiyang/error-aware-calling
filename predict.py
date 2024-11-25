@@ -210,7 +210,6 @@ def predict_bayesian2(args):
             position = int(id.split("_")[1])
 
             if is_print_test:
-                # if position not in (29422047, 29782547):
                 if position != 29422047:
                     continue
 
