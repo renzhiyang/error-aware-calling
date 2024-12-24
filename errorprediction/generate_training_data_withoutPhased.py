@@ -297,51 +297,8 @@ def label_unphased_read(
                     if hap_1 != hap_2:
                         continue
 
-                """
-                # mismatch, and non germline variant loci, vcf file variant should change to 1-based.
-                if ref_base != read_base and ref_pos_origin + i + 1 not in variants:
-                    # sequence_around = get_sequence(full_read_sequence=forward_sequence,
-                    #                                      position=read_pos + i,
-                    #                                      is_forward = read.is_forward,
-                    #                                      insert_len=0,
-                    #                                      is_indel=False,
-                    #                                      config=config)
-                    sequence_around = get_sequence(
-                        full_read_sequence=ref_seq,
-                        position=ref_pos_clip + i,
-                        is_forward=read.is_forward,
-                        insert_len=0,
-                        delete_len=0,
-                        is_indel=False,
-                        args=args,
-                    )
-                    print_label(
-                        chrom=chrom,
-                        type="Negative",
-                        read_strand=read_strand,
-                        position=ref_pos_origin + i + 1,
-                        label=ref_base,
-                        read_base=read_base,
-                        ref_base=ref_base,
-                        alts=None,
-                        is_germline="No",
-                        variant_type="SNV",
-                        sequence_around=sequence_around,
-                        args=args,
-                    )
-                    label_count += 1
-                    # Print test
-                    # print(f'ref_pos:{ref_pos+i+1}, ref_base:{ref_base}, read_base:{read_base}'
-                    #  f'sequence_around:{sequence_around}')
-                """
-
-                # print(f"{read.query_name}, {read.reference_start} {read.reference_end}")
                 # new version, iterate read and print all sampels
                 base_type = "Positive" if ref_base == read_base else "Negative"
-
-                # exclude positive samples:
-                # if base_type == "Positive":
-                #    continue
 
                 sequence_around = get_sequence(
                     full_read_sequence=ref_seq,
@@ -384,12 +341,6 @@ def label_unphased_read(
 
             if not is_germline:
                 combined = read_base + inserted_bases
-                # sequence_around = get_sequence(full_read_sequence=forward_sequence,
-                #                                    position=read_pos,
-                #                                    is_forward = read.is_forward,
-                #                                    insert_len=len(inserted_bases),
-                #                                    is_indel=True,
-                #                                    config=config)
                 sequence_around = get_sequence(
                     full_read_sequence=ref_seq,
                     position=ref_pos_clip,
@@ -431,12 +382,6 @@ def label_unphased_read(
                 continue
 
             if not is_germline:
-                # sequence_around = get_sequence(full_read_sequence=forward_sequence,
-                #                                  position=read_pos,
-                #                                  is_forward = read.is_forward,
-                #                                  insert_len=0,
-                #                                  is_indel=True,
-                #                                  config=config)
                 sequence_around = get_sequence(
                     full_read_sequence=ref_seq,
                     position=ref_pos_clip,
@@ -968,50 +913,25 @@ def label_data(
 ):
     haplotype = get_phased_read_haplotype(read)
     check_generate_label_file_from_path(args.label_out)
-    # print(type(config.controller.unphased),config.controller.unphased)
     # if haplotype is None and args.unphased:
     if (
         haplotype is None
-    ):  # new version, print smaples from both phased and unphased reads
+    ): 
         label_unphased_read(chrom, read, ref_seq, variants, confident_regions, args)
-    # elif haplotype is not None and args.phased:
     else:
         label_phased_read(chrom, read, ref_seq, variants, confident_regions, args)
-    # else:
-    #    return
 
 
 def generate_label(args):
-    # bam_file = pysam.AlignmentFile(config.data_path.bam_f)
-    vcf_reader = PhasedVCFReader(args.phased_vcf)
-    variants = vcf_reader.get_variants()
     reference = load_ref(args.ref_f)
     confident_regions = load_bed(args.confident_f)
     bam_file = pysam.AlignmentFile(args.tagged_bam, "rb")
-
-    """ 
-    # get reads by "samtools view"
-    # If there are no region is specified, then process all the data in the BAM file
-    #if args.ctg_name == "all":
-        subprocess = utils.samtools_view_from(
-            ctg_name="",
-            ctg_start="",
-            ctg_end="",
-            bam_fn=args.tagged_bam,
-            min_mq=args.min_mq,
-            samtools=args.samtools,
-        )
+    # Load phased VCF file
+    if args.phased_vcf:
+        vcf_reader = PhasedVCFReader(args.phased_vcf)
+        variants = vcf_reader.get_variants()
     else:
-        subprocess = utils.samtools_view_from(
-            ctg_name=args.ctg_name,
-            ctg_start=args.ctg_start,
-            ctg_end=args.ctg_end,
-            bam_fn=args.tagged_bam,
-            min_mq=args.min_mq,
-            samtools=args.samtools,
-        )
-    reads = subprocess.stdout
-    """
+        variants = {}
 
     count_pass = 0
     count = 0
@@ -1028,11 +948,11 @@ def generate_label(args):
             read, confident_regions[chrom]
         ):
             count_conf += 1
-            # new_label_data(chrom, read, variants_dict[chrom], reference[chrom], config)
+            variants_chrom = variants[chrom] if chrom in variants else {}
             label_data(
                 chrom,
                 read,
-                variants[chrom],
+                variants_chrom,
                 reference[chrom],
                 confident_regions[chrom],
                 args,
@@ -1066,7 +986,7 @@ def main():
         "--tagged_bam", type=str, help="tagged bam file path", default="", required=True
     )
     parser.add_argument(
-        "--phased_vcf", type=str, help="phased vcf file path", default="", required=True
+        "--phased_vcf", type=str, help="phased vcf file path", default="", required=False
     )
     parser.add_argument(
         "--min_mq",

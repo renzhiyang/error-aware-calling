@@ -197,7 +197,9 @@ def reconstruct_ref_seq_new(query_seq, is_forward, md_tag, cigar, start_pos, end
 
         elif b == "D":
             for _ in range(length):
-                if pointer == end_pos or pointer + length >= end_pos:  # if reach the candidate position, then
+                if (
+                    pointer == end_pos or pointer + length >= end_pos
+                ):  # if reach the candidate position, then
                     # TODO there is a bug for deletion
                     # refer to chr21:29048050
                     ref_candidate_pos = ref_index
@@ -213,9 +215,9 @@ def reconstruct_ref_seq_new(query_seq, is_forward, md_tag, cigar, start_pos, end
     if is_forward:
         final_ref = final_ref[:ref_candidate_pos]
     else:
-        final_ref = final_ref[ref_candidate_pos+1:]
-        if is_deletion: # TODO there is a bug for deletion case
-            final_ref = final_ref[ref_candidate_pos+del_len:]
+        final_ref = final_ref[ref_candidate_pos + 1 :]
+        if is_deletion:  # TODO there is a bug for deletion case
+            final_ref = final_ref[ref_candidate_pos + del_len :]
     final_ref = "".join(final_ref)
 
     # print test codes
@@ -230,13 +232,16 @@ def reconstruct_ref_seq_new(query_seq, is_forward, md_tag, cigar, start_pos, end
     return final_ref
 
 
-def get_query_base(query_seq, cigar, ref_start, candidate_pos):
+def get_query_base(query_seq, quality_seq, cigar, ref_start, candidate_pos):
     cur_base = ""
     next_ins = "N"
     length = 0
     query_index = 0
+    base_quality = 0
     ref_index = ref_start
 
+    # transfer base quality sequence to quality values
+    phred_scores = [ord(char) - 33 for char in quality_seq]
     for b in cigar:
         if b.isdigit():
             length = length * 10 + int(b)
@@ -249,11 +254,15 @@ def get_query_base(query_seq, cigar, ref_start, candidate_pos):
             for _ in range(length):
                 if ref_index <= candidate_pos:
                     cur_base = query_seq[query_index]
+                    base_quality = phred_scores[query_index]
                 query_index += 1
                 ref_index += 1
         elif b == "I":
             if ref_index == candidate_pos + 1:
                 next_ins = query_seq[query_index : query_index + length]
+                # Use average phred scores as quality score of insertion
+                sub_phred_scores = phred_scores[query_index : query_index + length]
+                base_quality = sum(sub_phred_scores) / len(sub_phred_scores)
             query_index += length
         elif b == "D":
             for _ in range(length):
@@ -264,7 +273,7 @@ def get_query_base(query_seq, cigar, ref_start, candidate_pos):
 
     if cur_base == "N":  # for some case there are N showed in query reads
         cur_base = "-"
-    return cur_base, next_ins
+    return cur_base, base_quality, next_ins
 
 
 def get_tensor_sequence_from(read, candidate_pos, window_width):
@@ -283,6 +292,7 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     QUERY_POS = int(read[3])  # leftmost mapping, 1-based position in ctg
     CIGAR = read[5]
     SEQ = read[9].upper()
+    BASE_QUALITY = read[10]
     MD = None
     is_forward = 1 if FLAG & 16 == 0 else 0
 
@@ -300,7 +310,9 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     # get the previous reference bases before the current candidate position
     # ref_seq = reconstruct_ref_seq(SEQ, MD, CIGAR, QUERY_POS, CAN_POS)
     ref_seq = reconstruct_ref_seq_new(SEQ, is_forward, MD, CIGAR, QUERY_POS, CAN_POS)
-    cur_base, next_ins = get_query_base(SEQ, CIGAR, QUERY_POS, CAN_POS)
+    cur_base, base_quality, next_ins = get_query_base(
+        SEQ, BASE_QUALITY, CIGAR, QUERY_POS, CAN_POS
+    )
 
     if not is_forward:
         ref_seq = utils.reverse_complement(ref_seq)
@@ -318,7 +330,7 @@ def get_tensor_sequence_from(read, candidate_pos, window_width):
     #         f"start_pos: {QUERY_POS}, end_pos: {CAN_POS}, cur_base: {cur_base}, next_ins: {next_ins}"
     #     )
     #     print(f"ref_seq: {ref_seq}")
-    return is_forward, ref_seq, cur_base, next_ins
+    return is_forward, ref_seq, cur_base, base_quality, next_ins
 
 
 def create_tensor(args):
@@ -340,7 +352,7 @@ def create_tensor(args):
         # if candidate_pos != 29048050: # deletion
         # if candidate_pos != 29036349: # snv
         # if candidate_pos != 29003614: # deletion
-        #if candidate_pos != 29002949: # snv
+        # if candidate_pos != 29002949: # snv
         #    continue
 
         subprocess = samtools_view_from(
@@ -352,9 +364,13 @@ def create_tensor(args):
             continue
 
         for i, read in enumerate(reads):
-            is_forward, tensor_sequence, cur_base, next_ins = get_tensor_sequence_from(
-                read, candidate_pos, window_width
+            is_forward, tensor_sequence, cur_base, base_quality, next_ins = (
+                get_tensor_sequence_from(read, candidate_pos, window_width)
             )
+
+            if base_quality <= args.min_bq:  # exclude current base quality score <= 15
+                continue
+
             if cur_base == "":  # for some reads, there are all ""
                 continue
 
@@ -405,6 +421,9 @@ def main():
     )
     parser.add_argument(
         "--min_mq", type=int, default=20, help="Minimum mapping quality of a read"
+    )
+    parser.add_argument(
+        "--min_bq", type=int, default=15, help="Minimum base quality of current base"
     )
     parser.add_argument(
         "--tensor_window_width",

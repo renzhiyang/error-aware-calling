@@ -2,6 +2,7 @@ import os
 import hydra
 import torch
 import torch.nn as nn
+import torch.profiler as profiler
 
 import errorprediction.models.nets as nets
 import errorprediction.utils as utils
@@ -16,6 +17,7 @@ from datetime import datetime
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter  # type: ignore
+from torch.amp import autocast, GradScaler
 
 
 def custon_collate_fn(batch):
@@ -54,10 +56,18 @@ def create_data_loader(dataset, batch_size: int, train_ratio: float):
     )
     train_dataset, test_dataset = random_split(flat_data, [train_size, test_size])  # type: ignore
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custon_collate_fn
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=8,
+        collate_fn=custon_collate_fn,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=True, collate_fn=custon_collate_fn
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=8,
+        collate_fn=custon_collate_fn,
     )
 
     return train_loader, test_loader
@@ -91,12 +101,18 @@ def train(
     criterion_1,
     criterion_2,
     optimizer,
+    scaler,
     writer,
     epoch,
     cur_file_index,
     count_file,
     config,
 ):
+    cur_start_time = datetime.now()
+    print(
+        f"Start Time:{cur_start_time}, Epoch {epoch} file {cur_file_index}",
+        flush=True,
+    )
     save_interval = 5
     # epochs = config.training.epochs
     model_dir = config.training.model_path + "/" + start_time
@@ -109,22 +125,43 @@ def train(
     for i, (inputs, labels_1, labels_2) in enumerate(train_loader):
         optimizer.zero_grad()
         inputs, labels_1, labels_2 = (
+            # inputs.half().to(device),
+            # labels_1.half().to(device),
+            # labels_2.half().to(device),
             inputs.to(device),
             labels_1.to(device),
             labels_2.to(device),
         )
+
+        # operation time log
+        # with profiler.profile(
+        #    activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA],
+        #    on_trace_ready=profiler.tensorboard_trace_handler('./log')
+        # ) as prof:
+        #    with autocast(device_type="cuda", dtype=torch.float16):
+        #        next_base, insertion = model(inputs)
+
+        # print(prof.key_averages().table(sort_by="cuda_time_total"))
+
         # print(f'num: {i+1}, input shape:{inputs.shape}')
         # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
-        next_base, insertion = model(inputs)
+        with autocast(device_type="cuda", dtype=torch.float16):
+            next_base, insertion = model(inputs)
+        # next_base, insertion = model(inputs)
         # print(f"training next_base: {next_base}, training label: {labels_1}")
         # print(f"training insertion: {insertion}, training label: {labels_2}")
-
         loss_1 = criterion_1(next_base, labels_1)
         loss_2 = criterion_2(insertion, labels_2)
+
         loss = loss_1 + loss_2
-        loss.backward()
-        optimizer.step()
         running_loss += loss_1.item() + loss_2.item()
+
+        # loss.backward()
+        # optimizer.step()
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
     cur_file_loss = running_loss / len(train_loader)
     writer.add_scalar("Loss/train by file_index", cur_file_loss, count_file)
@@ -135,7 +172,7 @@ def train(
     # log_weights(epoch, writer, model)
     writer.flush()
     print(
-        f"Time:{datetime.now()}, Epoch {epoch} file {cur_file_index}, Loss_train: {cur_file_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f} \n",
+        f"Time:{datetime.now()}, dur: {datetime.now() - cur_start_time} Epoch {epoch} file {cur_file_index}, Loss_train: {cur_file_loss:.4f}, Loss_test: {val_loss:.4f}, Accuracy: {accuracy:.4f} \n",
         flush=True,
     )
 
@@ -366,6 +403,9 @@ def main(config: DictConfig) -> None:
     criterion_1 = nn.CrossEntropyLoss()
     criterion_2 = nn.CrossEntropyLoss()
 
+    # Automatic Mixed Precision
+    scaler = GradScaler()
+
     # load data from data_folder and training
     epochs = config.training.epochs
     count_file = 0
@@ -381,6 +421,8 @@ def main(config: DictConfig) -> None:
                     flush=True,
                 )
 
+                time_dataloader = datetime.now()
+
                 label_f = os.path.join(root, file)
                 dataset = Data_Loader(
                     file_path=label_f,
@@ -392,6 +434,7 @@ def main(config: DictConfig) -> None:
                     batch_size=config.training.batch_size,
                     train_ratio=config.training.train_ratio,
                 )
+                print(f"dataloader time dur: {datetime.now() - time_dataloader}")
                 # optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3)
                 optimizer = torch.optim.Adam(
                     model.parameters(),
@@ -405,6 +448,7 @@ def main(config: DictConfig) -> None:
                     criterion_1,
                     criterion_2,
                     optimizer,
+                    scaler,
                     writer,
                     epoch,
                     cur_file_index,
