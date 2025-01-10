@@ -151,16 +151,13 @@ def get_sequence(
     """
     window_half = args.window_size_half
 
-    # if the current read is reverse strand, update the current position
-    # if not is_forward:
-    #    position = len(full_read_sequence) - position - insert_len - 1
-    #    if is_indel:
-    #        position += 1
     start = max(0, position - window_half)
     end = position
     if args.seq_around == True:
-        end = position + delete_len + window_half
+        # for using context sequence
+        end = position + delete_len + window_half - 1
     else:
+        # for only using forward sequence
         if not is_forward:
             start = position + delete_len
             end = position + delete_len + window_half
@@ -169,13 +166,22 @@ def get_sequence(
 
     if not is_forward:
         seq = utils.reverse_complement(seq)
+
+    # padding N to start and end of sequence
+    number_left_padding = window_half - (position - start)
+    if args.seq_around == False:
+        number_left_padding = window_half - (end - start)
+    number_right_padding = window_half - (end - position) - 1
+    seq = "N" * number_left_padding + seq + "N" * number_right_padding
+    if len(seq) != window_half * 2 + delete_len - 1:
+        print(f"position: {position}, {seq}, {len(seq)}, {delete_len}")
+
     return seq
 
 
 def get_tag(read, tag_name):
     for tag in read.tags:
         if tag[0] == tag_name:
-            # print(tag[1])
             return tag[1]
     return None
 
@@ -198,20 +204,6 @@ def print_label(
     Print label to output config.data_path_label_f file.
     position should be change to 1-base
     """
-    # print(f'---start print---')
-    # append "N" at the start of the sequence if the length of the sequence is less than the window size as target:
-    if len(sequence_around) < args.window_size_half:
-        sequence_around = (
-            "N" * (args.window_size_half - len(sequence_around)) + sequence_around
-        )
-
-    if len(sequence_around) != args.window_size_half:
-        print(f"sequence_around:{sequence_around}")
-
-    # reverse read base
-    # if read_strand == "reverse":
-    #    print(f'position:{position}, read base:{read_base}')
-    #    read_base = reverse_seq(read_base)
 
     label_f = open(args.label_out, "a")
     print(
@@ -914,9 +906,7 @@ def label_data(
     haplotype = get_phased_read_haplotype(read)
     check_generate_label_file_from_path(args.label_out)
     # if haplotype is None and args.unphased:
-    if (
-        haplotype is None
-    ): 
+    if haplotype is None:
         label_unphased_read(chrom, read, ref_seq, variants, confident_regions, args)
     else:
         label_phased_read(chrom, read, ref_seq, variants, confident_regions, args)
@@ -986,7 +976,11 @@ def main():
         "--tagged_bam", type=str, help="tagged bam file path", default="", required=True
     )
     parser.add_argument(
-        "--phased_vcf", type=str, help="phased vcf file path", default="", required=False
+        "--phased_vcf",
+        type=str,
+        help="phased vcf file path",
+        default="",
+        required=False,
     )
     parser.add_argument(
         "--min_mq",
