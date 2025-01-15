@@ -1,5 +1,6 @@
 import os
 import hydra
+from sqlalchemy import except_all
 import torch
 import torch.nn as nn
 import torch.profiler as profiler
@@ -7,9 +8,8 @@ import torch.profiler as profiler
 import errorprediction.models.nets as nets
 import errorprediction.utils as utils
 
-# from errorprediction.model import *
 from errorprediction.models.baseline import Baseline, Baseline_Kmer_In
-from errorprediction.data_loader_truth_input_training import Data_Loader
+from errorprediction.data_loader_truIn_kmer_context import Data_Loader, Data_Loader_Inmemory_pt
 
 from torchinfo import summary  # type: ignore
 from omegaconf import DictConfig, OmegaConf
@@ -21,15 +21,24 @@ from torch.amp import autocast, GradScaler
 
 
 def custon_collate_fn(batch):
+    batch = [sample_list for sample_list in batch if sample_list is not None]
+
     if not batch:
         return torch.tensor([]), torch.tensor([]), torch.tensor([])
+
+    # flatten batch, because one __getitem__ may return multiple samples
+    # flattened_batch = []
+    # for sample_list in batch:
+    #    flattened_batch.extend(sample_list)
+
     inputs, labels_1, labels_2 = zip(*batch)
-    inputs = torch.stack([torch.tensor(input, dtype=torch.float32) for input in inputs])
+
+    inputs = torch.stack([torch.tensor(input, dtype=torch.float16) for input in inputs])
     labels_1 = torch.stack(
-        [torch.tensor(label_1, dtype=torch.float32) for label_1 in labels_1]
+        [torch.tensor(label_1, dtype=torch.float16) for label_1 in labels_1]
     )
     labels_2 = torch.stack(
-        [torch.tensor(label_2, dtype=torch.float32) for label_2 in labels_2]
+        [torch.tensor(label_2, dtype=torch.float16) for label_2 in labels_2]
     )
     return inputs, labels_1, labels_2
 
@@ -44,32 +53,28 @@ def create_data_loader(dataset, batch_size: int, train_ratio: float):
     ]
     """
     print(f"original len: {len(dataset)}", flush=True)
-    dataset = [item for item in dataset if item is not None]
-    flat_data = [
-        sample for sublist in dataset for sample in sublist if sample is not None
-    ]
-    train_size = int(train_ratio * len(flat_data))
-    test_size = len(flat_data) - train_size
+    train_size = int(train_ratio * len(dataset))
+    test_size = len(dataset) - train_size
     print(
-        f"flat dataset len: {len(flat_data)}, train: {train_size}, test: {test_size}",
+        f"flat dataset len: {len(dataset)}, train: {train_size}, test: {test_size}",
         flush=True,
     )
-    train_dataset, test_dataset = random_split(flat_data, [train_size, test_size])  # type: ignore
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])  # type: ignore
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=16,
         collate_fn=custon_collate_fn,
+        pin_memory=True,
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=16,
         collate_fn=custon_collate_fn,
     )
-
     return train_loader, test_loader
 
 
@@ -133,18 +138,6 @@ def train(
             labels_2.to(device),
         )
 
-        # operation time log
-        # with profiler.profile(
-        #    activities=[profiler.ProfilerActivity.CPU, profiler.ProfilerActivity.CUDA],
-        #    on_trace_ready=profiler.tensorboard_trace_handler('./log')
-        # ) as prof:
-        #    with autocast(device_type="cuda", dtype=torch.float16):
-        #        next_base, insertion = model(inputs)
-
-        # print(prof.key_averages().table(sort_by="cuda_time_total"))
-
-        # print(f'num: {i+1}, input shape:{inputs.shape}')
-        # print(f'label1 shape: {labels_1.shape}, label2 shape: {labels_2.shape}')
         with autocast(device_type="cuda", dtype=torch.float16):
             next_base, insertion = model(inputs)
         # next_base, insertion = model(inputs)
@@ -354,15 +347,15 @@ def main(config: DictConfig) -> None:
     writer = SummaryWriter(config.data_path.tensorboard_f)
 
     # update up_seq_len if the input encoder is kmer encoder
-    UP_SEQ_LEN = config.training.up_seq_len
+    SEQ_LEN = config.training.up_seq_len * 2
     if config.training.encoder == "kmer":
-        UP_SEQ_LEN = config.training.up_seq_len - config.training.kmer + 1
+        SEQ_LEN = (config.training.up_seq_len - config.training.kmer + 1) * 2
 
     # model = Baseline().to(device)
     # model = Baseline_Kmer_In(k=config.training.kmer).to(device)
     if config.training.model == "lstm":
         model = nets.LSTM_simple(
-            seq_len=UP_SEQ_LEN,
+            seq_len=SEQ_LEN,
             num_layers=config.training.num_layers,
             num_class1=config.training.num_class_1,
             num_class2=config.training.num_class_2,
@@ -375,7 +368,7 @@ def main(config: DictConfig) -> None:
             with_embedding=config.training.with_embedding,
             num_layers=config.training.num_layers,
             forward_expansion=config.training.forward_expansion,
-            seq_len=UP_SEQ_LEN + 3,  # include [SEP] and class1 class2
+            seq_len=SEQ_LEN + 2,  # include class1 class2
             # seq_len=UP_SEQ_LEN, # exclude next_base and next_insertion
             # seq_len=UP_SEQ_LEN + 2,  # include class1 class2
             dropout_rate=config.training.drop_out,
@@ -386,7 +379,7 @@ def main(config: DictConfig) -> None:
         model = nets.Encoder_Transformer_NoEmbedding(
             heads=config.training.heads,
             num_layers=config.training.num_layers,
-            seq_len=UP_SEQ_LEN,
+            seq_len=SEQ_LEN,
             dropout_rate=config.training.drop_out,
             forward_expansion=config.training.forward_expansion,
             num_class1=config.training.num_class_1,
@@ -395,7 +388,7 @@ def main(config: DictConfig) -> None:
 
     summary(
         model,
-        input_size=(config.training.batch_size, UP_SEQ_LEN + 3),
+        input_size=(config.training.batch_size, SEQ_LEN + 2),
         device=device,
         depth=4,
     )
@@ -424,18 +417,25 @@ def main(config: DictConfig) -> None:
                 time_dataloader = datetime.now()
 
                 label_f = os.path.join(root, file)
+                # load label file
                 dataset = Data_Loader(
                     file_path=label_f,
                     config=config,
                     chunk_size=config.training.data_loader_chunk_size,
                 )
+                
+                # load pt file
+                # dataset = Data_Loader_Inmemory_pt(pt_file=label_f)
                 train_loader, test_loader = create_data_loader(
                     dataset,
                     batch_size=config.training.batch_size,
                     train_ratio=config.training.train_ratio,
                 )
-                print(f"dataloader time dur: {datetime.now() - time_dataloader}")
-                # optimizer = torch.optim.Adam(model.parameters(), lr=config.training.learning_rate, weight_decay=1e-3)
+                # print(
+                #    f"dataloader time dur: {datetime.now() - time_dataloader}",
+                #    flush=True,
+                # )
+
                 optimizer = torch.optim.Adam(
                     model.parameters(),
                     lr=config.training.learning_rate,

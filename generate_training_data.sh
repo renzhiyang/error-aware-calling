@@ -143,12 +143,21 @@ generate_training_data() {
   local ctg_name=$1
   local start=$2
   local end=$3
-  python -m errorprediction.generate_training_data \
+  #python -m errorprediction.generate_training_data \
+  #  --confident_f $BED_FILE \
+  #  --ref_f $REF_FILE \
+  #  --label_out $LABEL_PREFIX/$ctg_name.$start.$end.label \
+  #  --tagged_bam $BAM_FILE \
+  #  --phased_vcf $VCF_FILE \
+  #  --ctg_name $ctg_name \
+  #  --ctg_start $start \
+  #  --ctg_end $end \
+  #  --window_size_half $WINDOW_SIZE_HALF
+  python -m errorprediction.generate_training_data_withoutPhased \
     --confident_f $BED_FILE \
     --ref_f $REF_FILE \
     --label_out $LABEL_PREFIX/$ctg_name.$start.$end.label \
     --tagged_bam $BAM_FILE \
-    --phased_vcf $VCF_FILE \
     --ctg_name $ctg_name \
     --ctg_start $start \
     --ctg_end $end \

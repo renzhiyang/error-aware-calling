@@ -119,12 +119,20 @@ def reverse_prob_distributions(next_base_dis, insertion_dis):
     return next_base_dis, insertion_dis
 
 
-def print_genotype(ctg_name, cur_pos, cur_probs, bayesian_threshold, out_fn):
-    snv_probs = {k: v for k, v in cur_probs.items() if k.startswith("snv")}
-    ins_probs = {k: v for k, v in cur_probs.items() if k.startswith("insertion")}
+def sort_genotype_by_type_from(genotype_probs, variant_type):
+    # sort the probs of genotypes by variant_type ("snv", or "insertion")
+    type_probs = {k: v for k, v in genotype_probs.items() if k.startswith(variant_type)}
+    type_probs_sorted = sorted(type_probs.items(), key=lambda x: x[1], reverse=True)
+    return type_probs_sorted
 
-    snv_sorted = sorted(snv_probs.items(), key=lambda x: x[1], reverse=True)
-    ins_sorted = sorted(ins_probs.items(), key=lambda x: x[1], reverse=True)
+
+def print_genotype(ctg_name, cur_pos, cur_probs, bayesian_threshold, out_fn):
+    snv_sorted = sort_genotype_by_type_from(cur_probs, "snv")
+    ins_sorted = sort_genotype_by_type_from(cur_probs, "insertion")
+
+    if len(snv_sorted) == 0 or len(ins_sorted) == 0:
+        return
+
     snv_sorted = normalize_genotype(snv_sorted, 5)
     ins_sorted = normalize_genotype(ins_sorted, 5)
     if snv_sorted[0][1] < bayesian_threshold:
@@ -137,13 +145,45 @@ def print_genotype(ctg_name, cur_pos, cur_probs, bayesian_threshold, out_fn):
     print(outline, flush=True)
 
 
+def print_genotype_by_strand(
+    caller,
+    ctg_name,
+    cur_pos,
+    cur_probs_forward,
+    cur_probs_reverse,
+    bayesian_threshold,
+    out_fn,
+):
+    combined_probs = caller.add_pos_probs_of_two_reads(
+        cur_probs_forward, cur_probs_reverse
+    )
+    # if there are no forward or reverse strand reads, print
+    if len(cur_probs_forward) == 0 or len(cur_probs_reverse) == 0:
+        print_genotype(ctg_name, cur_pos, combined_probs, bayesian_threshold, out_fn)
+        return
+
+    snv_forward_sorted = sort_genotype_by_type_from(cur_probs_forward, "snv")
+    ins_forward_sorted = sort_genotype_by_type_from(cur_probs_forward, "insertion")
+    snv_reverse_sorted = sort_genotype_by_type_from(cur_probs_reverse, "snv")
+    ins_reverse_sorted = sort_genotype_by_type_from(cur_probs_reverse, "insertion")
+    snv_combined_sorted = sort_genotype_by_type_from(combined_probs, "snv")
+    snv_forward_max_genotype = snv_forward_sorted[0][0]
+    snv_reverse_max_genotype = snv_reverse_sorted[0][0]
+    if snv_forward_max_genotype != snv_reverse_max_genotype:
+        if "-" not in snv_forward_max_genotype and "-" not in snv_reverse_max_genotype:
+            print(
+                f"{cur_pos}, forward: {snv_forward_sorted[0]}, reverse: {snv_reverse_sorted[0]}, total: {snv_combined_sorted[0]}"
+            )
+    pass
+
+
 def predict_bayesian2(args):
     model_fn = args.model
     tensor_fn = args.tensor_fn
     out_fn = args.output_fn
 
     # print button
-    is_print_test = False
+    is_print_test = True
 
     # check file path
     if not os.path.exists(model_fn):
@@ -182,7 +222,7 @@ def predict_bayesian2(args):
     model.eval()
 
     cur_pos = 0
-    likelihoods = []
+    likelihoods = {}
 
     with torch.no_grad():
         base_count = {base: 0 for base in utils.CLASSES_PROB_1}
@@ -197,44 +237,51 @@ def predict_bayesian2(args):
             observe_ins = str(line[4])
             read_strand = line[5]
             observe_ins = "-" if observe_ins == "N" else observe_ins
+            position = int(id.split("_")[1])
 
-            # count base and insertion, they are used for calculate prior probability of genotype
-            base_count[observe_b] += 1
-            ins_count[observe_ins] += 1
+            if read_strand == "reverse":
+                observe_b = model_utils.reverse_complement(observe_b)
+                # TODO for inseriont
+
+            if is_print_test:
+                if position != 29940059:
+                    continue
 
             # TODO for some case, label_2 is like "AN"
             # should fix this error
             if "N" in observe_ins:
                 continue
 
-            position = int(id.split("_")[1])
-
-            if is_print_test:
-                if position != 29422047:
-                    continue
-
             if cur_pos != position:
                 if cur_pos != 0:
-                    print(f"base count: {base_count}")
-                    # print the posterior probability of genotype
-                    prior_genotypes = caller.prior_probability_of_genotype_log(
-                        base_count, ins_count
-                    )
-                    pos_probs = {
-                        key: prior_genotypes[key] + likelihoods[key]
-                        for key in prior_genotypes
-                    }
+                    #TODO currently the prob distribution for '-' is uncorrect
+                    # So lets filter them now.
+                    if base_count['-'] == 0: 
+                        print(f"base count: {base_count}")
+                        # print the posterior probability of genotype
+                        prior_genotypes = caller.prior_probability_of_genotype_log(
+                            base_count, ins_count
+                        )
+                        pos_probs = {
+                            key: prior_genotypes[key] + likelihoods[key]
+                            for key in prior_genotypes
+                        }
 
-                    print_genotype(
-                        ctg_name, cur_pos, pos_probs, args.bayesian_threshold, out_fn
-                    )
+                        print_genotype(
+                            ctg_name, cur_pos, pos_probs, args.bayesian_threshold, out_fn
+                        )
                     # reset counts
                     base_count = {base: 0 for base in base_count}
                     ins_count = {ins: 0 for ins in ins_count}
 
                 cur_pos = position
-                likelihoods = []
+                likelihoods = {}
 
+            # update base_count and ins_count
+            base_count[observe_b] += 1
+            ins_count[observe_ins] += 1
+
+            # tokenize input sentence
             input_tokenization = (
                 model_utils.input_tokenization_include_ground_truth_kmer(
                     input_seq, observe_b, observe_ins, params["kmer"]
@@ -248,37 +295,34 @@ def predict_bayesian2(args):
             next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
             insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
 
-            # for reverse strand, change the order of prob distributions
-            if read_strand == "reverse":
-                # in the genotype calculate, it should use forward-based nucleotide
-                observe_b = model_utils.reverse_complement(observe_b)
-                # TODO include insertion
-                # observe_ins = model_utils.reverse_complement(observe_ins)
-
-                next_base_dis, insertion_base_dis = reverse_prob_distributions(
-                    next_base_dis, insertion_base_dis
-                )
-
-            # print test
-            if is_print_test:
-                max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
-                print(
-                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
-                    flush=True,
-                )
-
             all_genotype_pos_probs_one_read = (
                 caller.all_genotypes_likelihood_per_read_log(
                     next_base_dis, insertion_base_dis, observe_b, observe_ins
                 )
             )
+
             if len(likelihoods) == 0:
                 likelihoods = all_genotype_pos_probs_one_read
             else:
                 likelihoods = caller.add_pos_probs_of_two_reads(
                     likelihoods, all_genotype_pos_probs_one_read
                 )
-                # print(f"position: {cur_pos}, probs: {cur_probs}")
+
+            # print test
+            if is_print_test:
+                max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+                cur_genos = sort_genotype_by_type_from(all_genotype_pos_probs_one_read, "snv")
+                sorted_likelihoods = sort_genotype_by_type_from(likelihoods, "snv")
+                # top_5 = normalize_genotype(sorted_likelihoods, 5)
+                np.set_printoptions(precision=4)
+                print(
+                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max base: {max_prob_base}, predicted dis:{next_base_dis} ",
+                    flush=True,
+                )
+                print(f"cur      genotypes      log: {cur_genos}")
+                print(f"accumulated likelihoods log: {sorted_likelihoods}\n")
+                # print(f"cur genotys: {normalize_genotype(cur_genos, 14)}")
+                # print(f"likelihoods: {normalize_genotype(sorted_likelihoods, 14)}\n")
 
     if is_print_test:
         print(f"base count: {base_count}")
@@ -297,7 +341,7 @@ def predict_bayesian1(args):
     out_fn = args.output_fn
 
     # print button
-    is_print_test = False
+    is_print_test = True
 
     # check file path
     if not os.path.exists(model_fn):
@@ -358,7 +402,7 @@ def predict_bayesian1(args):
             position = int(id.split("_")[1])
 
             if is_print_test:
-                if position != 29422047:
+                if position != 29779339:
                     continue
 
             if cur_pos != position:
@@ -374,16 +418,12 @@ def predict_bayesian1(args):
                     input_seq, observe_b, observe_ins, params["kmer"]
                 )
             )
-            # tensor_kmer = utils.kmer_seq(input_seq, k=params["kmer"])
             input_tensor = (
                 torch.tensor(input_tokenization).float().unsqueeze(0).to(device)
             )
             next_base_dis, insertion_dis = model(input_tensor)
             next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
             insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
-
-            # next_base_dis = normalize_tensor(next_base_dis)
-            # insertion_base_dis = normalize_tensor(insertion_base_dis)
 
             # for reverse strand, change the order of prob distributions
             if read_strand == "reverse":
@@ -399,8 +439,9 @@ def predict_bayesian1(args):
             # print test
             if is_print_test:
                 max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+                np.set_printoptions(precision=4)
                 print(
-                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max prob base(foward-based):{max_prob_base}, predicted dis:{next_base_dis} ",
+                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, max_base: {max_prob_base}, predicted dis:{next_base_dis} ",
                     flush=True,
                 )
 
@@ -428,6 +469,158 @@ def predict_bayesian1(args):
 
     if is_print_test:
         print_genotype("chr21", cur_pos, cur_probs, args.bayesian_threshold, out_fn)
+
+
+def predict_bayesian1_correct_error_within_one_strand(args):
+    model_fn = args.model
+    tensor_fn = args.tensor_fn
+    out_fn = args.output_fn
+
+    # print button
+    is_print_test = False
+
+    # check file path
+    if not os.path.exists(model_fn):
+        print(f"Error: Model file '{model_fn}' does not exist.")
+        return
+    if not os.path.isfile(tensor_fn):
+        print(f"Error: Tensor file '{tensor_fn}' does not exist.")
+        return
+
+    # new predicted results file of current tensors
+    out_fn = open(out_fn, "w")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tensor_f = open(tensor_fn, "r")
+    caller = bayesian.BayesianCaller()
+    params = load_model_paras(args.config_fn)
+
+    # calculate the kmer vocabulary size
+    # [0:kmer_token_shift] values encode class values and [SEP] symbol
+    VOCAB_SIZE = params["num_tokens"] ** params["kmer"] + params["kmer_token_shift"]
+
+    print(f"device: {device}")
+    # model = Baseline().to(device)
+    model = nets.Encoder_Transformer(
+        embed_size=params["embed_size"],
+        vocab_size=VOCAB_SIZE,
+        num_layers=params["num_layers"],
+        forward_expansion=params["forward_expansion"],
+        seq_len=params["up_seq_len"] - params["kmer"] + 4,  # with [sep] symbol
+        # seq_len=params["up_seq_len"] - params["kmer"] + 3,  # without [sep] symbol
+        dropout_rate=params["drop_out"],
+        num_class1=params["num_class_1"],
+        num_class2=params["num_class_2"],
+    ).to(device)
+    model.load_state_dict(torch.load(model_fn, map_location=device, weights_only=True))
+    model.eval()
+
+    cur_pos = 0
+    cur_probs_forward = {}
+    cur_probs_reverse = {}
+
+    with torch.no_grad():
+        for line in tensor_f:
+            line = line.strip().split()
+
+            ctg_name = line[0]
+            id = line[1]
+            input_seq = line[2]
+            observe_b = str(line[3])
+            observe_ins = str(line[4])
+            read_strand = line[5]
+            observe_ins = "-" if observe_ins == "N" else observe_ins
+
+            # TODO for some case, label_2 is like "AN"
+            # should fix this error
+            if "N" in observe_ins:
+                continue
+
+            position = int(id.split("_")[1])
+
+            if is_print_test:
+                if position != 29859217:
+                    continue
+
+            if cur_pos != position:  # output posterior probs
+                if cur_pos != 0:
+                    print_genotype_by_strand(
+                        caller,
+                        ctg_name,
+                        cur_pos,
+                        cur_probs_forward,
+                        cur_probs_reverse,
+                        args.bayesian_threshold,
+                        out_fn,
+                    )
+                cur_pos = position
+                cur_probs_forward = {}
+                cur_probs_reverse = {}
+
+            input_tokenization = (
+                model_utils.input_tokenization_include_ground_truth_kmer(
+                    input_seq, observe_b, observe_ins, params["kmer"]
+                )
+            )
+            input_tensor = (
+                torch.tensor(input_tokenization).float().unsqueeze(0).to(device)
+            )
+            next_base_dis, insertion_dis = model(input_tensor)
+            next_base_dis = next_base_dis.cpu().detach().numpy().reshape(-1)
+            insertion_base_dis = insertion_dis.cpu().detach().numpy().reshape(-1)
+
+            # for reverse strand, change the order of prob distributions
+            if read_strand == "reverse":
+                # in the genotype calculate, it should use forward-based nucleotide
+                observe_b = model_utils.reverse_complement(observe_b)
+                # TODO include insertion
+                # observe_ins = model_utils.reverse_complement(observe_ins)
+
+                next_base_dis, insertion_base_dis = reverse_prob_distributions(
+                    next_base_dis, insertion_base_dis
+                )
+
+            # print test
+            if is_print_test:
+                max_prob_base = utils.CLASSES_PROB_1[np.argmax(next_base_dis)]
+                np.set_printoptions(precision=4)
+                print(
+                    f"position: {position}, {read_strand}, {input_seq}, observed base(forward-based):{observe_b}, predicted dis:{next_base_dis} ",
+                    flush=True,
+                )
+
+            all_genotype_pos_probs_one_read = (
+                caller.all_genotypes_posterior_prob_per_read_log(
+                    next_base_dis, insertion_base_dis, observe_b, observe_ins
+                )
+            )
+
+            # calcurate the likelihood of genotypes by read strand
+            if read_strand == "forward":
+                if len(cur_probs_forward) == 0:
+                    cur_probs_forward = all_genotype_pos_probs_one_read
+                else:
+                    cur_probs_forward = caller.add_pos_probs_of_two_reads(
+                        cur_probs_forward, all_genotype_pos_probs_one_read
+                    )
+            else:
+                if len(cur_probs_reverse) == 0:
+                    cur_probs_reverse = all_genotype_pos_probs_one_read
+                else:
+                    cur_probs_reverse = caller.add_pos_probs_of_two_reads(
+                        cur_probs_reverse, all_genotype_pos_probs_one_read
+                    )
+
+    if is_print_test:
+        print_genotype_by_strand(
+            caller,
+            "chr21",
+            cur_pos,
+            cur_probs_forward,
+            cur_probs_reverse,
+            args.bayesian_threshold,
+            out_fn,
+        )
 
 
 def main():
@@ -463,8 +656,9 @@ def main():
         help="a threshold that filter genotype with probability, in range of [0,1]",
     )
     args = parser.parse_args()
-    # predict_bayesian2(args)
-    predict_bayesian1(args)
+    predict_bayesian2(args)
+    # predict_bayesian1(args)
+    # predict_bayesian1_correct_error_within_one_strand(args)
 
 
 if __name__ == "__main__":
