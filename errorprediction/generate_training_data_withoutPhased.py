@@ -143,19 +143,30 @@ def get_sequence(
     """
     Extract the truth sequence around a given position with a specified window size.
     example: half window is 2
-    SNV: return AACTT, C is the variant posision, 1 window + 1 base
-    Insertion: true AATT, query AAAATT insert 2 bases
-        around return AATT
-    Deletion: true AACCTT, query AATT delete 2 bases,
-        around return AACCTT, forward return AA,
+    SNV forward: return AACTT, C is the variant posision 
+    SNV reverse: AAGTT, G is the variant position
+
+    2-GG Insertion here
+    Insertion forward: AACTT, C is the variant position
+    Insertion reverse: AAGTT, G is the variant position
+    
+    2-GG Deletion
+    Deletion forward: AAC(GG)TT, C is the variant position
+    Deletion reverse: AA(GG)GAA, G is the variant position, the reverse complement of forward
     """
     window_half = args.window_size_half
+
+    # for deletion, the start position should be one base before deletion region
+    # for example, ACT--T, here the position should be 2.
+    if is_indel:
+        position = position - 1
+        print("here is a insertion or deletion")
 
     start = max(0, position - window_half)
     end = position
     if args.seq_around == True:
         # for using context sequence
-        end = position + delete_len + window_half - 1
+        end = position + delete_len + window_half + 1
     else:
         # for only using forward sequence
         if not is_forward:
@@ -164,17 +175,16 @@ def get_sequence(
 
     seq = full_read_sequence[start:end]
 
-    if not is_forward:
-        seq = utils.reverse_complement(seq)
-
     # padding N to start and end of sequence
     number_left_padding = window_half - (position - start)
     if args.seq_around == False:
         number_left_padding = window_half - (end - start)
-    number_right_padding = window_half - (end - position) - 1
+    number_right_padding = window_half - (end - position - 1)
     seq = "N" * number_left_padding + seq + "N" * number_right_padding
-    if len(seq) != window_half * 2 + delete_len - 1:
-        print(f"position: {position}, {seq}, {len(seq)}, {delete_len}")
+
+    # for reverse stand
+    if not is_forward:
+        seq = utils.reverse_complement(seq)
 
     return seq
 

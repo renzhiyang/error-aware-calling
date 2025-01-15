@@ -211,12 +211,31 @@ def input_tokenization_include_ground_truth_kmer(
     input_array.append(TOKENS.index(insertion))
     return input_array
 
-def input_tokenization_without_grount_truth_kmer(
-    up_seq:str, kmer:int
+
+def input_tokenization_include_ground_truth_kmer_context(
+    up_seq: str, down_seq: str, next_base: str, insertion: str, kmer: int
 ):
+    """Description:
+    input sequence tokenization method, include next_base and insertion as input
+    meanwhile inputs include context information, not only upstream sequence
+    """
+    input_array = []
+    up_array = input_tokenization_kmer(up_seq, kmer)
+    down_array = input_tokenization_kmer(down_seq, kmer)
+
+    if up_array is None or down_array is None:
+        return None
+
+    input_array = (
+        up_array + [TOKENS.index(next_base)] + [TOKENS.index(insertion)] + down_array
+    )
+    return input_array
+
+
+def input_tokenization_without_grount_truth_kmer(up_seq: str, kmer: int):
     input_array = []
     input_array = input_tokenization_kmer(up_seq, kmer)
-    
+
     if input_array is None:
         return None
     return input_array
